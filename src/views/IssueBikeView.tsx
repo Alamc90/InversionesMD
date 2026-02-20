@@ -3,11 +3,13 @@ import { CustomerForm } from '../components/CustomerForm';
 import { DataService } from '../services/DataService';
 import { Customer } from '../models/Customer';
 import { Vehicle } from '../models/Vehicle';
-import { InstallmentPlan } from '../models/Payment';
+import { InstallmentPlan as PaymentPlanModel } from '../models/Payment';
+import InstallmentPlanComponent from '../components/InstallmentPlan';
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
+import { toast } from "sonner"
 
 export const IssueBikeView: React.FC = () => {
     const [step, setStep] = useState(1);
@@ -24,14 +26,15 @@ export const IssueBikeView: React.FC = () => {
         setStep(3);
     };
 
-    const handlePlanSubmit = async (plan: InstallmentPlan) => {
+    const handlePlanSubmit = async (plan: PaymentPlanModel) => {
         if (customer && vehicle) {
             const result = await DataService.createFullRecord(customer, vehicle, plan);
             if (result.success) {
-                alert('Moto entregada exitosamente!');
+                toast.success('Moto entregada exitosamente!');
                 setStep(1); // Reset or redirect
             } else {
-                alert('Error al guardar datos');
+                console.error("Error saving data:", result.error);
+                toast.error(`Error al guardar datos: ${result.error?.message || 'Unknown error'}`);
             }
         }
     };
@@ -85,43 +88,18 @@ export const IssueBikeView: React.FC = () => {
                                     <Input id="plate" name="plate" placeholder="Placa" required />
                                 </div>
                             </div>
-                            <Button type="submit">Siguiente: Plan de Pagos</Button>
+                            <div className="flex gap-4">
+                                <Button type="button" variant="outline" onClick={() => setStep(1)}>Atrás</Button>
+                                <Button type="submit">Siguiente</Button>
+                            </div>
                         </form>
                     </CardContent>
                 </Card>
             )}
 
             {step === 3 && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Plan de Pagos</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <form onSubmit={(e) => {
-                            e.preventDefault();
-                            const fd = new FormData(e.currentTarget);
-                            handlePlanSubmit({
-                                total_installments: Number(fd.get('total')),
-                                installment_value: Number(fd.get('value')),
-                                installments_paid: 0
-                            });
-                        }} className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="total">Cantidad Total de Cuotas</Label>
-                                    <Input id="total" name="total" type="number" placeholder="Ej: 24" required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="value">Valor de Cada Cuota</Label>
-                                    <Input id="value" name="value" type="number" placeholder="$ Valor" required />
-                                </div>
-                            </div>
-                            <Button type="submit">Finalizar y Guardar</Button>
-                        </form>
-                    </CardContent>
-                </Card>
+                <InstallmentPlanComponent onSubmit={handlePlanSubmit} onBack={() => setStep(2)} />
             )}
         </div>
     );
 };
-

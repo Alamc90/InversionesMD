@@ -76,7 +76,7 @@ export const CustomerForm: React.FC<Props> = ({ onSubmit }) => {
                         </div>
                     </div>
                     
-                    <Button type="submit" className="w-full md:w-auto">Siguiente: Vehículo</Button>
+                    <Button type="submit" className="w-full md:w-auto">Siguiente</Button>
                 </form>
             </CardContent>
         </Card>
