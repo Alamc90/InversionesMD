@@ -52,6 +52,7 @@ vehicle-installment-manager
 3. Install the dependencies:
    ```
    npm install
+   npm install @supabase/supabase-js.
    ```
 
 ## Usage
@@ -65,4 +66,4 @@ vehicle-installment-manager
 Contributions are welcome! Please submit a pull request or open an issue for any enhancements or bug fixes.
 
 ## License
-This project is licensed under the MIT License. See the LICENSE file for details."# InversionesMD" 
+This project is licensed under the MIT License. See the LICENSE file for details.
