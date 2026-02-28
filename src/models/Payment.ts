@@ -7,6 +7,7 @@ export interface InstallmentPlan {
     total_amount?: number;
     payment_frequency: 'DIARIO' | 'SEMANAL' | 'QUINCENAL' | 'MENSUAL';
     start_date?: string;
+    down_payment?: number;      // "cuota inicial"
 }
 
 export interface PaymentRecord {

@@ -28,4 +28,7 @@ export interface InstallmentPlan {
     total_installments: number;
     installment_value: number;
     installments_paid: number;
+    payment_frequency?: string;
+    start_date?: string;
+    down_payment?: number;
 }

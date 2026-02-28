@@ -34,7 +34,13 @@ export const IssueBikeView: React.FC = () => {
                 setStep(1); // Reset or redirect
             } else {
                 console.error("Error saving data:", result.error);
-                toast.error(`Error al guardar datos: ${result.error?.message || 'Unknown error'}`);
+                let errMsg = 'Unknown error';
+                if (result.error instanceof Error) {
+                    errMsg = result.error.message;
+                } else if (result.error && typeof (result.error as any).message === 'string') {
+                    errMsg = (result.error as any).message;
+                }
+                toast.error(`Error al guardar datos: ${errMsg}`);
             }
         }
     };

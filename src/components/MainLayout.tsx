@@ -6,6 +6,7 @@ import { supabase } from '@/config/supabaseClient';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Session } from '@supabase/supabase-js';
+import { Settings } from 'lucide-react';
 
 export const MainLayout = ({ children }: { children: React.ReactNode }) => {
     const router = useRouter();
@@ -55,17 +56,33 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
                     <h1 className="text-xl font-bold">InversionesMD</h1>
                     <nav className="flex gap-4 items-center">
                         <Link href="/dashboard">
-                            <Button 
-                                variant={pathname === '/dashboard' ? "default" : "ghost"} 
+                            <Button
+                                variant={pathname === '/dashboard' ? "default" : "ghost"}
                             >
                                 Dashboard
                             </Button>
                         </Link>
+                        <Link href="/registros">
+                            <Button
+                                variant={pathname === '/registros' ? "default" : "ghost"}
+                            >
+                                Registros
+                            </Button>
+                        </Link>
                         <Link href="/nueva-entrega">
-                            <Button 
+                            <Button
                                 variant={pathname === '/nueva-entrega' ? "default" : "ghost"}
                             >
                                 + Nueva Entrega
+                            </Button>
+                        </Link>
+                        <Link href="/configuracion">
+                            <Button 
+                                variant={pathname === '/configuracion' ? "default" : "ghost"}
+                                size="icon"
+                                title="Configuración"
+                            >
+                                <Settings className="h-5 w-5" />
                             </Button>
                         </Link>
                         <Button 

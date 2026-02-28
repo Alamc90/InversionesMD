@@ -21,6 +21,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [phone, setPhone] = useState('');
+    const [isRecovery, setIsRecovery] = useState(false);
 
     const validatePassword = (pwd: string) => {
         if (pwd.length < 8) return "La contraseña debe tener al menos 8 caracteres";
@@ -36,6 +37,23 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         { regex: /[a-z]/, text: "Al menos una minúscula" },
         { regex: /[0-9]/, text: "Al menos un número" }
     ];
+
+    const handleRecovery = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setLoading(true);
+        try {
+            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/update-password` : undefined,
+            });
+            if (error) throw error;
+            toast.success('Se ha enviado un correo de recuperación');
+            setIsRecovery(false);
+        } catch (error: any) {
+            toast.error(error.message || 'Error al enviar correo de recuperación');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -92,6 +110,44 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
             setLoading(false);
         }
     };
+
+    if (isRecovery) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">
+                <Card className="w-full max-w-md">
+                    <CardHeader className="text-center">
+                        <CardTitle className="text-2xl">Recuperar Contraseña</CardTitle>
+                        <CardDescription>
+                            Ingrese su correo para recibir un enlace de recuperación
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <form onSubmit={handleRecovery} className="space-y-4">
+                            <div className="space-y-2">
+                                <Label htmlFor="email">Correo Electrónico</Label>
+                                <Input 
+                                    id="email" 
+                                    type="email" 
+                                    placeholder="nombre@ejemplo.com" 
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    required 
+                                />
+                            </div>
+                            <Button type="submit" className="w-full" disabled={loading}>
+                                {loading ? 'Enviando...' : 'Enviar Link de Recuperación'}
+                            </Button>
+                        </form>
+                    </CardContent>
+                    <CardFooter className="flex justify-center">
+                         <Button variant="link" onClick={() => setIsRecovery(false)}>
+                            Volver al inicio de sesión
+                        </Button>
+                    </CardFooter>
+                </Card>
+            </div>
+        );
+    }
 
     return (
         <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">
@@ -152,7 +208,20 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                         )}
 
                         <div className="space-y-2">
-                            <Label htmlFor="password">Contraseña</Label>
+                            <div className="flex items-center justify-between">
+                                <Label htmlFor="password">Contraseña</Label>
+                                {isLogin && (
+                                    <Button 
+                                        type="button"
+                                        variant="link" 
+                                        size="sm"
+                                        className="px-0 h-auto font-normal text-xs text-muted-foreground"
+                                        onClick={() => setIsRecovery(true)}
+                                    >
+                                        ¿Olvidó su contraseña?
+                                    </Button>
+                                )}
+                            </div>
                             <div className="relative">
                                 <Input 
                                     id="password" 

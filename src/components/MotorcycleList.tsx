@@ -83,8 +83,7 @@ export const MotorcycleList: React.FC = () => {
                                             let colorClass = "text-gray-500";
 
                                             if (count > 0) {
-                                                label = "Pendientes";
-                                                value = count.toString();
+                                                value = `${count} Pendientes`;
                                                 if (count <= 3) {
                                                     colorClass = "text-yellow-600";
                                                 } else {

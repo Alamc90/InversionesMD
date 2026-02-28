@@ -2,6 +2,9 @@ import { supabase } from '../config/supabaseClient';
 import { Customer } from '../models/Customer';
 import { Vehicle } from '../models/Vehicle';
 import { InstallmentPlan } from '../models/Payment';
+import { BusinessConfig } from '../models/BusinessConfig';
+
+import { PaymentPlanTemplate } from '../models/PaymentPlanTemplate';
 
 export const DataService = {
   /**
@@ -66,7 +69,8 @@ export const DataService = {
             installment_value: plan.installment_value,
             installments_paid: 0,
             payment_frequency: plan.payment_frequency,
-            start_date: plan.start_date
+            start_date: plan.start_date,
+            down_payment: plan.down_payment || 0
             // total_amount is likely a generated column, so we don't insert it explicitly
         }]);
 
@@ -87,7 +91,7 @@ export const DataService = {
       .select(`
         *,
         customers ( first_name, last_name ),
-        installment_plans ( total_installments, installments_paid, installment_value )
+        installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency )
       `);
       
     if (error) throw error;
@@ -206,5 +210,123 @@ export const DataService = {
       
       if (error) throw error;
       return data;
-  }
+  },
+
+  async getBusinessConfig() {
+      const { data, error } = await supabase
+          .from('business_config')
+          .select('*')
+          .single();
+      
+      if (error && error.code !== 'PGRST116') {
+          console.error("Error fetching config:", error);
+          throw error;
+      }
+      return data;
+  },
+
+  async saveBusinessConfig(config: BusinessConfig) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user logged in");
+
+      const { data, error } = await supabase
+          .from('business_config')
+          .upsert([{
+              user_id: user.id,
+              business_name: config.business_name,
+              nit: config.nit,
+              address: config.address,
+              phone: config.phone
+          }], { onConflict: 'user_id' })
+          .select()
+          .single();
+
+      if (error) {
+          console.error("Error saving config:", error);
+          throw error;
+      }
+      return data;
+  },
+
+  async getPaymentPlanTemplates(): Promise<PaymentPlanTemplate[]> {
+      const { data, error } = await supabase
+          .from('payment_plan_templates')
+          .select('*')
+          .order('created_at', { ascending: true });
+      if (error) throw error;
+      return data;
+  },
+
+    async getCustomers() {
+        const { data, error } = await supabase
+            .from('customers')
+            .select('*')
+            .order('first_name', { ascending: true });
+
+        if (error) throw error;
+        return data;
+    },
+
+    async updateCustomer(id: number, customerData: Partial<Customer>) {
+        const { data, error } = await supabase
+            .from('customers')
+            .update(customerData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    },
+
+    async getVehicles() {
+        const { data, error } = await supabase
+            .from('vehicles')
+            .select('*, customers(first_name, last_name, cedula)')
+            .order('model', { ascending: true });
+
+        if (error) throw error;
+        return data;
+    },
+
+    async updateVehicle(id: number, vehicleData: Partial<Vehicle>) {
+        const { data, error } = await supabase
+            .from('vehicles')
+            .update(vehicleData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    },
+
+    async savePaymentPlanTemplate(template: PaymentPlanTemplate) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("No user logged in");
+
+        const { data, error } = await supabase
+            .from('payment_plan_templates')
+            .insert([{
+                user_id: user.id,
+                name: template.name,
+                total_installments: template.total_installments,
+                installment_value: template.installment_value,
+                payment_frequency: template.payment_frequency,
+                down_payment: template.down_payment
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
+        return data;
+    },
+
+    async deletePaymentPlanTemplate(id: string) {
+        const { error } = await supabase
+            .from('payment_plan_templates')
+            .delete()
+            .eq('id', id);
+        if (error) throw error;
+    }
 };
