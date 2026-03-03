@@ -75,22 +75,22 @@ export const RecordsView = () => {
     };
 
     return (
-        <div className="flex flex-col md:flex-row gap-6 max-w-6xl mx-auto">
+        <div className="flex flex-col md:flex-row gap-4 md:gap-6 max-w-6xl mx-auto">
             <Card className="w-full md:w-64 h-fit shrink-0">
-                <CardHeader>
+                <CardHeader className="pb-2 md:pb-6">
                     <CardTitle className="text-lg">Directorios</CardTitle>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-2">
+                <CardContent className="flex flex-row md:flex-col gap-2">
                     <Button 
                         variant={activeTab === 'clientes' ? 'default' : 'ghost'} 
-                        className="justify-start"
+                        className="justify-start flex-1 md:flex-none"
                         onClick={() => setActiveTab('clientes')}
                     >
                         Clientes
                     </Button>
                     <Button 
                         variant={activeTab === 'vehiculos' ? 'default' : 'ghost'} 
-                        className="justify-start"
+                        className="justify-start flex-1 md:flex-none"
                         onClick={() => setActiveTab('vehiculos')}
                     >
                         Vehículos
@@ -107,7 +107,8 @@ export const RecordsView = () => {
                         {loading ? (
                             <p>Cargando...</p>
                         ) : activeTab === 'clientes' ? (
-                            <Table>
+                            <div className="overflow-x-auto -mx-4 sm:mx-0">
+                            <Table className="min-w-[500px]">
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Nombre</TableHead>
@@ -134,8 +135,10 @@ export const RecordsView = () => {
                                     )}
                                 </TableBody>
                             </Table>
+                            </div>
                         ) : (
-                            <Table>
+                            <div className="overflow-x-auto -mx-4 sm:mx-0">
+                            <Table className="min-w-[600px]">
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>Modelo</TableHead>
@@ -164,19 +167,20 @@ export const RecordsView = () => {
                                     )}
                                 </TableBody>
                             </Table>
+                            </div>
                         )}
                     </CardContent>
                 </Card>
             </div>
 
             <Dialog open={!!editingCustomer} onOpenChange={(open) => !open && setEditingCustomer(null)}>
-                <DialogContent>
+                <DialogContent className="max-w-lg w-[95vw]">
                     <DialogHeader>
                         <DialogTitle>Editar Cliente</DialogTitle>
                     </DialogHeader>
                     {editingCustomer && (
                         <form onSubmit={handleSaveCustomer} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Nombre</Label>
                                     <Input value={editingCustomer.first_name || ''} onChange={e => setEditingCustomer({...editingCustomer, first_name: e.target.value})} required/>
@@ -201,13 +205,13 @@ export const RecordsView = () => {
             </Dialog>
 
             <Dialog open={!!editingVehicle} onOpenChange={(open) => !open && setEditingVehicle(null)}>
-                <DialogContent>
+                <DialogContent className="max-w-lg w-[95vw]">
                     <DialogHeader>
                         <DialogTitle>Editar Vehículo</DialogTitle>
                     </DialogHeader>
                     {editingVehicle && (
                         <form onSubmit={handleSaveVehicle} className="space-y-4">
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-2">
                                     <Label>Modelo</Label>
                                     <Input value={editingVehicle.model || ''} onChange={e => setEditingVehicle({...editingVehicle, model: e.target.value})} required/>

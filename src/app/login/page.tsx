@@ -3,23 +3,43 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { LoginView } from '@/views/LoginView';
-import { supabase } from '@/config/supabaseClient';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginPage() {
     const router = useRouter();
-    const [loading, setLoading] = useState(true);
+    const { session, business, loading, tablesNotReady } = useAuth();
+    const [showLogin, setShowLogin] = useState(false);
 
+    // If already logged in, redirect away
     useEffect(() => {
-        // Redirigir si ya tiene sesión
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session) {
+        if (!loading && session) {
+            if (tablesNotReady || business) {
                 router.replace('/dashboard');
+            } else {
+                router.replace('/setup-negocio');
             }
-            setLoading(false);
-        });
-    }, [router]);
+        }
+    }, [loading, session, business, tablesNotReady, router]);
 
-    if (loading) return <div className="flex items-center justify-center min-h-screen">Cargando...</div>;
+    // Always show login form after a brief moment, even if auth is still loading
+    useEffect(() => {
+        const timer = setTimeout(() => setShowLogin(true), 500);
+        return () => clearTimeout(timer);
+    }, []);
 
-    return <LoginView onLoginSuccess={() => router.push('/dashboard')} />;
+    // Show login form immediately if not loading and no session
+    // OR after 500ms timeout regardless of loading state
+    if (!loading && session) {
+        return <div className="flex items-center justify-center min-h-screen">Redirigiendo...</div>;
+    }
+
+    if (!showLogin && loading) {
+        return <div className="flex items-center justify-center min-h-screen">Cargando...</div>;
+    }
+
+    return <LoginView onLoginSuccess={() => {
+        setTimeout(() => {
+            router.push('/dashboard');
+        }, 500);
+    }} />;
 }

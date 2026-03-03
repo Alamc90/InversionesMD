@@ -46,9 +46,9 @@ export const IssueBikeView: React.FC = () => {
     };
 
     return (
-        <div className="max-w-3xl mx-auto py-8">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold tracking-tight mb-2">Entrega de Vehículo</h1>
+        <div className="max-w-3xl mx-auto py-2 md:py-8">
+            <div className="mb-6 md:mb-8">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight mb-2">Entrega de Vehículo</h1>
                 <div className="flex gap-2 text-sm text-muted-foreground">
                     <span className={step >= 1 ? "text-primary font-medium" : ""}>1. Cliente</span>
                     <span>&rarr;</span>

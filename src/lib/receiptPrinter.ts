@@ -10,6 +10,7 @@ interface PrintReceiptProps {
   vehicle: Vehicle;
   plan: any; // Installment plan
   businessConfig: BusinessConfig | null;
+  logoUrl?: string | null;
 }
 
 export const printReceipt = ({
@@ -18,6 +19,7 @@ export const printReceipt = ({
   vehicle,
   plan,
   businessConfig,
+  logoUrl,
 }: PrintReceiptProps) => {
   const width = "58mm";
   // Optimize styles for narrow 58mm paper. 
@@ -45,6 +47,13 @@ export const printReceipt = ({
       font-size: 14px;
       font-weight: bold;
       text-transform: uppercase;
+    }
+    .header .logo {
+      max-width: 40mm;
+      max-height: 15mm;
+      margin: 0 auto 3px auto;
+      display: block;
+      object-fit: contain;
     }
     .header p {
       margin: 1px 0;
@@ -116,6 +125,7 @@ export const printReceipt = ({
       </head>
       <body>
         <div class="header">
+          ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo" />` : ''}
           <h2>${businessConfig?.business_name || "MI NEGOCIO"}</h2>
           <p>NIT: ${businessConfig?.nit || "0000000000"}</p>
           <p>${businessConfig?.address || "Dirección Principal"}</p>

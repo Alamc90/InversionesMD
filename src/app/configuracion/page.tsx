@@ -10,16 +10,24 @@ import { DataService } from '@/services/DataService';
 import { BusinessConfig } from '@/models/BusinessConfig';
 import { PaymentPlanTemplate } from '@/models/PaymentPlanTemplate';
 import { useRouter } from 'next/navigation';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Upload, ImageIcon } from 'lucide-react';
 import { toast } from "sonner";
 import { parseCurrency, formatCurrency } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/contexts/AuthContext';
+import { UserManagementView } from '@/views/UserManagementView';
+import Image from 'next/image';
 
 export default function ConfigurationPage() {
     const router = useRouter();
+    const { hasPermission, refreshMembership } = useAuth();
+    const showUsers = hasPermission('can_manage_users');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
-    const [activeTab, setActiveTab] = useState<'business' | 'plans'>('business');
+    const [uploadingLogo, setUploadingLogo] = useState(false);
+    const [logoUrl, setLogoUrl] = useState<string | null>(null);
+    const [logoPreview, setLogoPreview] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<'business' | 'plans' | 'users'>('business');
     
     // Config state
     const [config, setConfig] = useState<BusinessConfig>({
@@ -50,6 +58,9 @@ export default function ConfigurationPage() {
                         address: data.address || '',
                         phone: data.phone || ''
                     });
+                    if (data.logo_url) {
+                        setLogoUrl(data.logo_url);
+                    }
                 }
                 const tp = await DataService.getPaymentPlanTemplates();
                 setTemplates(tp);
@@ -72,6 +83,8 @@ export default function ConfigurationPage() {
         setSaving(true);
         try {
             await DataService.saveBusinessConfig(config);
+            // Refresh membership to update business name/logo in header
+            await refreshMembership();
             toast.success("Configuración guardada exitosamente.");
         } catch (error) {
             console.error(error);
@@ -124,26 +137,36 @@ export default function ConfigurationPage() {
 
     return (
         <MainLayout>
-            <div className="flex flex-col md:flex-row gap-6 max-w-6xl mx-auto">
+            <div className="flex flex-col md:flex-row gap-4 md:gap-6 max-w-6xl mx-auto">
                 <aside className="w-full md:w-64 shrink-0">
                     <Card>
-                        <ul className="flex flex-col text-sm font-medium">
-                            <li>
+                        <ul className="flex flex-row md:flex-col text-sm font-medium overflow-x-auto">
+                            <li className="flex-1 md:flex-none">
                                 <button 
-                                    className={`w-full text-left px-4 py-3 border-b hover:bg-muted ${activeTab === 'business' ? 'bg-muted border-l-4 border-l-primary' : ''}`}
+                                    className={`w-full text-left px-4 py-3 border-b md:border-b hover:bg-muted whitespace-nowrap ${activeTab === 'business' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
                                     onClick={() => setActiveTab('business')}
                                 >
                                     Datos del Negocio
                                 </button>
                             </li>
-                            <li>
+                            <li className="flex-1 md:flex-none">
                                 <button 
-                                    className={`w-full text-left px-4 py-3 hover:bg-muted ${activeTab === 'plans' ? 'bg-muted border-l-4 border-l-primary' : ''}`}
+                                    className={`w-full text-left px-4 py-3 ${showUsers ? 'border-b md:border-b' : ''} hover:bg-muted whitespace-nowrap ${activeTab === 'plans' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
                                     onClick={() => setActiveTab('plans')}
                                 >
-                                    Planes de Pago Predefinidos
+                                    Planes de Pago
                                 </button>
                             </li>
+                            {showUsers && (
+                                <li className="flex-1 md:flex-none">
+                                    <button 
+                                        className={`w-full text-left px-4 py-3 hover:bg-muted whitespace-nowrap ${activeTab === 'users' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
+                                        onClick={() => setActiveTab('users')}
+                                    >
+                                        Usuarios
+                                    </button>
+                                </li>
+                            )}
                         </ul>
                     </Card>
                 </aside>
@@ -188,6 +211,67 @@ export default function ConfigurationPage() {
                                             onChange={handleConfigChange} placeholder="Ej. +502 5555-5555" required
                                         />
                                     </div>
+
+                                    {/* Logo Upload */}
+                                    <div className="space-y-2 border-t pt-4">
+                                        <Label>Logo del Negocio (Opcional)</Label>
+                                        <div className="flex items-center gap-4">
+                                            <div className="w-20 h-20 border-2 border-dashed rounded-lg flex items-center justify-center bg-muted/50 overflow-hidden shrink-0">
+                                                {(logoPreview || logoUrl) ? (
+                                                    <img 
+                                                        src={logoPreview || logoUrl || ''} 
+                                                        alt="Logo" 
+                                                        className="w-full h-full object-contain"
+                                                    />
+                                                ) : (
+                                                    <ImageIcon className="h-8 w-8 text-muted-foreground" />
+                                                )}
+                                            </div>
+                                            <div className="flex flex-col gap-2">
+                                                <label className="cursor-pointer">
+                                                    <input 
+                                                        type="file" 
+                                                        accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                                                        className="hidden"
+                                                        onChange={async (e) => {
+                                                            const file = e.target.files?.[0];
+                                                            if (!file) return;
+                                                            if (file.size > 2 * 1024 * 1024) {
+                                                                toast.error('La imagen no debe superar 2MB');
+                                                                return;
+                                                            }
+                                                            // Show preview immediately
+                                                            const reader = new FileReader();
+                                                            reader.onload = (ev) => setLogoPreview(ev.target?.result as string);
+                                                            reader.readAsDataURL(file);
+                                                            // Upload
+                                                            setUploadingLogo(true);
+                                                            try {
+                                                                const url = await DataService.uploadBusinessLogo(file);
+                                                                setLogoUrl(url);
+                                                                setLogoPreview(null);
+                                                                await refreshMembership();
+                                                                toast.success('Logo actualizado');
+                                                            } catch (err) {
+                                                                console.error('Logo upload error:', err);
+                                                                toast.error('Error al subir logo. Verifica que el bucket "business-logos" exista en Supabase Storage.');
+                                                                setLogoPreview(null);
+                                                            } finally {
+                                                                setUploadingLogo(false);
+                                                            }
+                                                        }}
+                                                    />
+                                                    <Button type="button" variant="outline" size="sm" disabled={uploadingLogo} asChild>
+                                                        <span>
+                                                            <Upload className="h-4 w-4 mr-1" />
+                                                            {uploadingLogo ? 'Subiendo...' : 'Subir Logo'}
+                                                        </span>
+                                                    </Button>
+                                                </label>
+                                                <p className="text-xs text-muted-foreground">PNG, JPG o SVG. Máx 2MB.</p>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </CardContent>
                                 <CardFooter className="flex justify-end">
                                     <Button type="submit" disabled={saving}>
@@ -196,6 +280,10 @@ export default function ConfigurationPage() {
                                 </CardFooter>
                             </form>
                         </Card>
+                    )}
+
+                    {activeTab === 'users' && showUsers && (
+                        <UserManagementView />
                     )}
 
                     {activeTab === 'plans' && (

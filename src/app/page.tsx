@@ -1,23 +1,29 @@
 "use client"
 
 import React, { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { supabase } from '@/config/supabaseClient';
 
 export default function Home() {
-    const router = useRouter();
-
     useEffect(() => {
-        const checkSession = async () => {
-            const { data: { session } } = await supabase.auth.getSession();
+        // Timeout: if nothing happens in 3s, go to login
+        const fallback = setTimeout(() => {
+            window.location.href = '/login';
+        }, 3000);
+
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            clearTimeout(fallback);
             if (session) {
-                router.replace('/dashboard');
+                window.location.href = '/dashboard';
             } else {
-                router.replace('/login');
+                window.location.href = '/login';
             }
-        };
-        checkSession();
-    }, [router]);
+        }).catch(() => {
+            clearTimeout(fallback);
+            window.location.href = '/login';
+        });
+
+        return () => clearTimeout(fallback);
+    }, []);
 
     return <div className="flex items-center justify-center min-h-screen">Redirigiendo...</div>;
 }

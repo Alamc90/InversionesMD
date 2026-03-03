@@ -30,10 +30,10 @@ export const MotorcycleList: React.FC = () => {
     );
 
     return (
-        <div className="space-y-6">
-            <div className="flex justify-between items-center">
-                <h2 className="text-3xl font-bold tracking-tight">Vehículos Entregados</h2>
-                <div className="w-full max-w-sm">
+        <div className="space-y-4 md:space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Vehículos Entregados</h2>
+                <div className="w-full sm:w-auto sm:max-w-sm">
                     <Input 
                         placeholder="Buscar por placa o cliente..." 
                         value={searchQuery}
@@ -41,7 +41,7 @@ export const MotorcycleList: React.FC = () => {
                     />
                 </div>
             </div>
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-4 md:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                 {filteredVehicles.map((v) => {
                     let plans = Array.isArray(v.installment_plans) ? v.installment_plans : (v.installment_plans ? [v.installment_plans] : []);
                     // Sort plans by ID descending to ensure we get the latest active plan

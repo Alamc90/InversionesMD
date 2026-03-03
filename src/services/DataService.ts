@@ -3,10 +3,60 @@ import { Customer } from '../models/Customer';
 import { Vehicle } from '../models/Vehicle';
 import { InstallmentPlan } from '../models/Payment';
 import { BusinessConfig } from '../models/BusinessConfig';
-
 import { PaymentPlanTemplate } from '../models/PaymentPlanTemplate';
 
+/**
+ * Cache for schema detection — we check once if the new columns/tables exist.
+ * null = not checked yet, true = new schema, false = legacy schema
+ */
+let _newSchemaAvailable: boolean | null = null;
+
+async function isNewSchemaAvailable(): Promise<boolean> {
+    if (_newSchemaAvailable !== null) return _newSchemaAvailable;
+    try {
+        // Try querying a column that only exists after the migration
+        const { error } = await supabase
+            .from('business_members')
+            .select('id')
+            .limit(0);
+        
+        if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+            _newSchemaAvailable = false;
+        } else {
+            _newSchemaAvailable = true;
+        }
+    } catch {
+        _newSchemaAvailable = false;
+    }
+    return _newSchemaAvailable;
+}
+
 export const DataService = {
+  /**
+   * Get business_id for the current user
+   */
+  async getBusinessId(): Promise<string | null> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+
+      const { data, error } = await supabase
+          .from('business_members')
+          .select('business_id')
+          .eq('user_id', user.id)
+          .maybeSingle();
+
+      // Table doesn't exist (migration not applied) — return null gracefully
+      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
+        return null;
+      }
+
+      return data?.business_id || null;
+    } catch {
+      return null;
+    }
+  },
+
   /**
    * Creates a full record: Customer -> Vehicle -> Plan
    */
@@ -19,10 +69,11 @@ export const DataService = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user logged in");
 
+      const businessId = await this.getBusinessId();
+      // business_id is optional (legacy mode when migration not applied)
+
       // 1. Create Customer (and Guarantor info)
-      const { data: customerData, error: customerError } = await supabase
-        .from('customers')
-        .upsert([{
+      const customerPayload: any = {
             user_id: user.id,
             first_name: customer.first_name,
             last_name: customer.last_name,
@@ -33,7 +84,12 @@ export const DataService = {
             guarantor_last_name: customer.guarantor_last_name,
             guarantor_cedula: customer.guarantor_cedula,
             guarantor_address: customer.guarantor_address
-        }], { onConflict: 'cedula' })
+      };
+      if (businessId) customerPayload.business_id = businessId;
+
+      const { data: customerData, error: customerError } = await supabase
+        .from('customers')
+        .upsert([customerPayload], { onConflict: 'cedula' })
         .select()
         .single();
 
@@ -41,28 +97,27 @@ export const DataService = {
       if (!customerData) throw new Error("Failed to create customer");
 
       // 2. Create Vehicle linked to Customer
-      // Changed to upsert to handle retries gracefully if the previous attempt failed at the plan stage
-      const { data: vehicleData, error: vehicleError } = await supabase
-        .from('vehicles')
-        .upsert([{
+      const vehiclePayload: any = {
             user_id: user.id,
             customer_id: customerData.id,
             model: vehicle.model,
             year: vehicle.year,
             color: vehicle.color,
             plate: vehicle.plate
-        }], { onConflict: 'plate' })
+      };
+      if (businessId) vehiclePayload.business_id = businessId;
+
+      const { data: vehicleData, error: vehicleError } = await supabase
+        .from('vehicles')
+        .upsert([vehiclePayload], { onConflict: 'plate' })
         .select()
         .single();
-
 
       if (vehicleError) throw vehicleError;
       if (!vehicleData) throw new Error("Failed to create vehicle");
 
       // 3. Create Installment Plan linked to Vehicle
-      const { error: planError } = await supabase
-        .from('installment_plans')
-        .insert([{
+      const planPayload: any = {
             user_id: user.id,
             vehicle_id: vehicleData.id,
             total_installments: plan.total_installments,
@@ -71,12 +126,16 @@ export const DataService = {
             payment_frequency: plan.payment_frequency,
             start_date: plan.start_date,
             down_payment: plan.down_payment || 0
-            // total_amount is likely a generated column, so we don't insert it explicitly
-        }]);
+      };
+      if (businessId) planPayload.business_id = businessId;
+
+      const { error: planError } = await supabase
+        .from('installment_plans')
+        .insert([planPayload]);
 
       if (planError) throw planError;
 
-      return { success: true, customerId: customerData.id };
+      return { success: true, customerId: customerData.id, vehicleData };
 
     } catch (error) {
       console.error("Transaction failed:", error);
@@ -85,39 +144,83 @@ export const DataService = {
   },
 
   async getActiveVehicles() {
-    // Fetches vehicles with their plan and owner
-    const { data, error } = await supabase
+    const businessId = await this.getBusinessId();
+    
+    let query = supabase
       .from('vehicles')
       .select(`
         *,
         customers ( first_name, last_name ),
         installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency )
       `);
+    
+    if (businessId) {
+      query = query.eq('business_id', businessId);
+    }
       
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   },
 
-  async registerPayment(planId: number, amount: number, note?: string) {
+  /**
+   * Register a payment. 
+   * If canAutoApprove is true, status = APROBADO; otherwise PENDIENTE.
+   */
+  async registerPayment(planId: number, amount: number, note?: string, canAutoApprove: boolean = false) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("No user logged in");
 
-    // 1. Insert payment record and return it to ensure we have it
+    const newSchema = await isNewSchemaAvailable();
+    const businessId = newSchema ? await this.getBusinessId() : null;
+
+    // Get display name
+    const displayName = user.user_metadata?.first_name 
+        ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim()
+        : user.email || 'Usuario';
+
+    const status = canAutoApprove ? 'APROBADO' : 'PENDIENTE';
+
+    // Build insert payload — only include new columns if migration was applied
+    const payload: any = {
+        plan_id: planId,
+        user_id: user.id,
+        amount: amount,
+        payment_date: new Date().toISOString(),
+        note: note,
+    };
+
+    if (newSchema) {
+        payload.business_id = businessId;
+        payload.status = status;
+        payload.created_by_name = displayName;
+        payload.approved_by = canAutoApprove ? user.id : null;
+        payload.approved_at = canAutoApprove ? new Date().toISOString() : null;
+    }
+
+    // 1. Insert payment record
     const { data: insertedPayment, error: paymentError } = await supabase
         .from('payment_records')
-        .insert([{
-            plan_id: planId,
-            user_id: user.id,
-            amount: amount,
-            payment_date: new Date().toISOString(),
-            note: note
-        }])
+        .insert([payload])
         .select()
         .single();
 
     if (paymentError) throw paymentError;
 
-    // 2. Fetch current plan to update installments_paid
+    // Update installments_paid
+    if (!newSchema || canAutoApprove) {
+        // Legacy mode: always update; New schema: only if auto-approved
+        const newProgress = await this.recalculateInstallmentsPaid(planId);
+        return { success: true, newProgress, payment: insertedPayment };
+    }
+
+    return { success: true, newProgress: undefined, payment: insertedPayment };
+  },
+
+  /**
+   * Recalculate installments_paid based on APROBADO payments only
+   */
+  async recalculateInstallmentsPaid(planId: number): Promise<number> {
     const { data: plan, error: planError } = await supabase
         .from('installment_plans')
         .select('installment_value')
@@ -128,34 +231,32 @@ export const DataService = {
     
     const instValue = Number(plan.installment_value);
 
-    // Force retrieval of fresh data by not using cache if possible (supabase-js usually doesn't cache by default unless configured)
-    const { data: allPayments, error: historyError } = await supabase
+    const newSchema = await isNewSchemaAvailable();
+
+    // Only count APROBADO payments if new schema; otherwise count all
+    let query = supabase
         .from('payment_records')
-        .select('amount, id') // Select ID to verify specific payment inclusion
+        .select('amount, id')
         .eq('plan_id', planId);
+    
+    if (newSchema) {
+        query = query.eq('status', 'APROBADO');
+    }
+
+    const { data: allPayments, error: historyError } = await query;
 
     if (historyError) throw historyError;
     
-    // Ensure we include the current payment in total
     let totalPaid = 0;
     if (allPayments) {
         totalPaid = allPayments.reduce((sum, record) => sum + Number(record.amount), 0);
     }
-
-    // Safety check: if allPayments query missed the new insert (rare but possible with replication lag), add it manually
-    if (insertedPayment && allPayments && !allPayments.some(p => p.id === insertedPayment.id)) {
-        totalPaid += Number(insertedPayment.amount);
-    }
     
-    // Calculate new installments count. Use toFixed(2) to avoid floating point weirdness during division like 0.999999
     const rawPaid = instValue > 0 ? (totalPaid / instValue) : 0;
-    
-    // Round to 2 decimals to match standard currency/float precision
     const newInstallmentsPaid = Number(rawPaid.toFixed(2));
 
     console.log(`Recalculating payment: TotalPaid ${totalPaid}, Value ${instValue}, NewPaid ${newInstallmentsPaid}`);
 
-    // Update the plan
     const { error: updateError } = await supabase
         .from('installment_plans')
         .update({ installments_paid: newInstallmentsPaid })
@@ -166,7 +267,86 @@ export const DataService = {
         throw updateError;
     }
 
-    return { success: true, newProgress: newInstallmentsPaid };
+    return newInstallmentsPaid;
+  },
+
+  /**
+   * Approve a pending payment
+   */
+  async approvePayment(paymentId: number) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("No user logged in");
+
+    const { data: payment, error: fetchError } = await supabase
+        .from('payment_records')
+        .select('*')
+        .eq('id', paymentId)
+        .single();
+
+    if (fetchError) throw fetchError;
+
+    const { error: updateError } = await supabase
+        .from('payment_records')
+        .update({ 
+            status: 'APROBADO',
+            approved_by: user.id,
+            approved_at: new Date().toISOString()
+        })
+        .eq('id', paymentId);
+
+    if (updateError) throw updateError;
+
+    // Recalculate installments_paid
+    const newProgress = await this.recalculateInstallmentsPaid(payment.plan_id);
+    
+    return { success: true, newProgress };
+  },
+
+  /**
+   * Deny a pending payment
+   */
+  async denyPayment(paymentId: number) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("No user logged in");
+
+    const { error } = await supabase
+        .from('payment_records')
+        .update({ 
+            status: 'DENEGADO',
+            approved_by: user.id,
+            approved_at: new Date().toISOString()
+        })
+        .eq('id', paymentId);
+
+    if (error) throw error;
+    return { success: true };
+  },
+
+  /**
+   * Get all pending payments for the business
+   */
+  async getPendingPayments() {
+    const businessId = await this.getBusinessId();
+    if (!businessId) return [];
+
+    const { data, error } = await supabase
+        .from('payment_records')
+        .select(`
+            *,
+            installment_plans (
+                id, vehicle_id, installment_value, total_installments, installments_paid,
+                vehicles (
+                    plate, model, year,
+                    customers ( first_name, last_name )
+                )
+            )
+        `)
+        .eq('business_id', businessId)
+        .eq('status', 'PENDIENTE')
+        .order('payment_date', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
   },
 
   async getPaymentHistory(planId: number) {
@@ -193,7 +373,6 @@ export const DataService = {
       
       if (error) throw error;
       
-      // Ensure specific consistent ordering for installment_plans: Newest first
       if (data && data.installment_plans && Array.isArray(data.installment_plans)) {
           data.installment_plans.sort((a: any, b: any) => b.id - a.id);
       }
@@ -213,6 +392,29 @@ export const DataService = {
   },
 
   async getBusinessConfig() {
+      const newSchema = await isNewSchemaAvailable();
+      
+      if (newSchema) {
+          const businessId = await this.getBusinessId();
+          if (businessId) {
+              const { data: bizData } = await supabase
+                  .from('businesses')
+                  .select('*')
+                  .eq('id', businessId)
+                  .single();
+              
+              if (bizData) {
+                  return {
+                      business_name: bizData.name,
+                      nit: bizData.nit,
+                      address: bizData.address,
+                      phone: bizData.phone,
+                      logo_url: bizData.logo_url,
+                  };
+              }
+          }
+      }
+
       const { data, error } = await supabase
           .from('business_config')
           .select('*')
@@ -225,9 +427,32 @@ export const DataService = {
       return data;
   },
 
-  async saveBusinessConfig(config: BusinessConfig) {
+  async saveBusinessConfig(config: any) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user logged in");
+
+      const newSchema = await isNewSchemaAvailable();
+      
+      if (newSchema) {
+          const businessId = await this.getBusinessId();
+          if (businessId) {
+              const { data, error } = await supabase
+                  .from('businesses')
+                  .update({
+                      name: config.business_name,
+                      nit: config.nit,
+                      address: config.address,
+                      phone: config.phone,
+                      updated_at: new Date().toISOString(),
+                  })
+                  .eq('id', businessId)
+                  .select()
+                  .single();
+
+              if (error) throw error;
+              return data;
+          }
+      }
 
       const { data, error } = await supabase
           .from('business_config')
@@ -248,85 +473,149 @@ export const DataService = {
       return data;
   },
 
+  async uploadBusinessLogo(file: File): Promise<string> {
+      const newSchema = await isNewSchemaAvailable();
+      const businessId = newSchema ? await this.getBusinessId() : null;
+      
+      const fileExt = file.name.split('.').pop();
+      const fileName = businessId 
+          ? `${businessId}/logo.${fileExt}` 
+          : `legacy/logo.${fileExt}`;
+
+      // Upload to Supabase Storage
+      const { data, error } = await supabase.storage
+          .from('business-logos')
+          .upload(fileName, file, { 
+              upsert: true,
+              contentType: file.type 
+          });
+
+      if (error) throw error;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+          .from('business-logos')
+          .getPublicUrl(fileName);
+
+      const logoUrl = urlData.publicUrl;
+
+      // Save URL to business record
+      if (newSchema && businessId) {
+          await supabase
+              .from('businesses')
+              .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
+              .eq('id', businessId);
+      }
+
+      return logoUrl;
+  },
+
   async getPaymentPlanTemplates(): Promise<PaymentPlanTemplate[]> {
-      const { data, error } = await supabase
+      const businessId = await this.getBusinessId();
+      
+      let query = supabase
           .from('payment_plan_templates')
           .select('*')
           .order('created_at', { ascending: true });
+
+      if (businessId) {
+          query = query.eq('business_id', businessId);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
       return data;
   },
 
-    async getCustomers() {
-        const { data, error } = await supabase
-            .from('customers')
-            .select('*')
-            .order('first_name', { ascending: true });
+  async getCustomers() {
+      const businessId = await this.getBusinessId();
+      
+      let query = supabase
+          .from('customers')
+          .select('*')
+          .order('first_name', { ascending: true });
 
-        if (error) throw error;
-        return data;
-    },
+      if (businessId) {
+          query = query.eq('business_id', businessId);
+      }
 
-    async updateCustomer(id: number, customerData: Partial<Customer>) {
-        const { data, error } = await supabase
-            .from('customers')
-            .update(customerData)
-            .eq('id', id)
-            .select()
-            .single();
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+  },
 
-        if (error) throw error;
-        return data;
-    },
+  async updateCustomer(id: number, customerData: Partial<Customer>) {
+      const { data, error } = await supabase
+          .from('customers')
+          .update(customerData)
+          .eq('id', id)
+          .select()
+          .single();
 
-    async getVehicles() {
-        const { data, error } = await supabase
-            .from('vehicles')
-            .select('*, customers(first_name, last_name, cedula)')
-            .order('model', { ascending: true });
+      if (error) throw error;
+      return data;
+  },
 
-        if (error) throw error;
-        return data;
-    },
+  async getVehicles() {
+      const businessId = await this.getBusinessId();
+      
+      let query = supabase
+          .from('vehicles')
+          .select('*, customers(first_name, last_name, cedula)')
+          .order('model', { ascending: true });
 
-    async updateVehicle(id: number, vehicleData: Partial<Vehicle>) {
-        const { data, error } = await supabase
-            .from('vehicles')
-            .update(vehicleData)
-            .eq('id', id)
-            .select()
-            .single();
+      if (businessId) {
+          query = query.eq('business_id', businessId);
+      }
 
-        if (error) throw error;
-        return data;
-    },
+      const { data, error } = await query;
+      if (error) throw error;
+      return data;
+  },
 
-    async savePaymentPlanTemplate(template: PaymentPlanTemplate) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) throw new Error("No user logged in");
+  async updateVehicle(id: number, vehicleData: Partial<Vehicle>) {
+      const { data, error } = await supabase
+          .from('vehicles')
+          .update(vehicleData)
+          .eq('id', id)
+          .select()
+          .single();
 
-        const { data, error } = await supabase
-            .from('payment_plan_templates')
-            .insert([{
-                user_id: user.id,
-                name: template.name,
-                total_installments: template.total_installments,
-                installment_value: template.installment_value,
-                payment_frequency: template.payment_frequency,
-                down_payment: template.down_payment
-            }])
-            .select()
-            .single();
+      if (error) throw error;
+      return data;
+  },
 
-        if (error) throw error;
-        return data;
-    },
+  async savePaymentPlanTemplate(template: PaymentPlanTemplate) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("No user logged in");
 
-    async deletePaymentPlanTemplate(id: string) {
-        const { error } = await supabase
-            .from('payment_plan_templates')
-            .delete()
-            .eq('id', id);
-        if (error) throw error;
-    }
+      const businessId = await this.getBusinessId();
+
+      const payload: any = {
+          user_id: user.id,
+          name: template.name,
+          total_installments: template.total_installments,
+          installment_value: template.installment_value,
+          payment_frequency: template.payment_frequency,
+          down_payment: template.down_payment
+      };
+      if (businessId) payload.business_id = businessId;
+
+      const { data, error } = await supabase
+          .from('payment_plan_templates')
+          .insert([payload])
+          .select()
+          .single();
+
+      if (error) throw error;
+      return data;
+  },
+
+  async deletePaymentPlanTemplate(id: string) {
+      const { error } = await supabase
+          .from('payment_plan_templates')
+          .delete()
+          .eq('id', id);
+      if (error) throw error;
+  }
 };
