@@ -9,9 +9,10 @@ import { Check, X, Eye, EyeOff } from "lucide-react"
 
 interface LoginViewProps {
     onLoginSuccess: () => void;
+    onSignUpSuccess: () => void;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSignUpSuccess }) => {
     const [isLogin, setIsLogin] = useState(true);
     const [loading, setLoading] = useState(false);
     const [email, setEmail] = useState('');
@@ -59,13 +60,26 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
         e.preventDefault();
         setLoading(true);
 
+        const withTimeout = <T,>(promise: Promise<T>, ms: number = 60000) => {
+            return Promise.race([
+                promise,
+                new Promise<T>((_, reject) => setTimeout(() => reject(new Error('La conexión tardó demasiado. Por favor, revisa tu conexión a internet o intenta nuevamente.')), ms))
+            ]);
+        };
+
         try {
             if (isLogin) {
-                const { error } = await supabase.auth.signInWithPassword({
+                const { error, data } = await withTimeout(supabase.auth.signInWithPassword({
                     email,
                     password,
-                });
+                }));
                 if (error) throw error;
+                
+                // Even if not an explicit error, verify we got a session
+                if (!data?.session) {
+                   throw new Error("No se pudo iniciar sesión. Por favor intenta nuevamente.");
+                }
+                
                 toast.success('Inicio de sesión exitoso');
                 onLoginSuccess();
             } else {
@@ -82,7 +96,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                     return;
                 }
 
-                const { error } = await supabase.auth.signUp({
+                const { error, data: signUpData } = await withTimeout(supabase.auth.signUp({
                     email,
                     password,
                     options: {
@@ -94,14 +108,18 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                         // Autodetect current URL for redirection after email confirmation
                         emailRedirectTo: typeof window !== 'undefined' ? `${window.location.origin}` : undefined
                     }
-                });
+                }));
                 if (error) throw error;
                 toast.success('Cuenta creada. Revisa tu correo o inicia sesión.');
                 
                 // Check if session was established immediately
-                const { data } = await supabase.auth.getSession();
-                if (data.session) {
-                    onLoginSuccess();
+                try {
+                  const { data } = await withTimeout(supabase.auth.getSession());
+                  if (data?.session) {
+                      onSignUpSuccess();
+                  }
+                } catch(e) {
+                   console.log("No automatic session after signup", e);
                 }
             }
         } catch (error: any) {

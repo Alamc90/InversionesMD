@@ -40,18 +40,25 @@ export const DataService = {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return null;
 
+      // Try reading from business_members
       const { data, error } = await supabase
           .from('business_members')
           .select('business_id')
           .eq('user_id', user.id)
+          .limit(1)
           .maybeSingle();
 
-      // Table doesn't exist (migration not applied) — return null gracefully
-      if (error && (error.code === '42P01' || error.message?.includes('does not exist'))) {
-        return null;
-      }
+      if (data?.business_id) return data.business_id;
 
-      return data?.business_id || null;
+      // Fallback: Check if user created any business recently
+      const { data: biz } = await supabase
+          .from('businesses')
+          .select('id')
+          .eq('created_by', user.id)
+          .limit(1)
+          .maybeSingle();
+      
+      return biz?.id || null;
     } catch {
       return null;
     }
@@ -63,15 +70,15 @@ export const DataService = {
   async createFullRecord(
     customer: Customer, 
     vehicle: Vehicle, 
-    plan: InstallmentPlan
+    plan: InstallmentPlan,
+    businessId?: string // Optional override for performance
   ) {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("No user logged in");
 
-      const businessId = await this.getBusinessId();
-      // business_id is optional (legacy mode when migration not applied)
-
+      const resolvedBusinessId = businessId || await this.getBusinessId();
+      
       // 1. Create Customer (and Guarantor info)
       const customerPayload: any = {
             user_id: user.id,
@@ -85,7 +92,7 @@ export const DataService = {
             guarantor_cedula: customer.guarantor_cedula,
             guarantor_address: customer.guarantor_address
       };
-      if (businessId) customerPayload.business_id = businessId;
+      if (resolvedBusinessId) customerPayload.business_id = resolvedBusinessId;
 
       const { data: customerData, error: customerError } = await supabase
         .from('customers')
@@ -105,7 +112,7 @@ export const DataService = {
             color: vehicle.color,
             plate: vehicle.plate
       };
-      if (businessId) vehiclePayload.business_id = businessId;
+      if (resolvedBusinessId) vehiclePayload.business_id = resolvedBusinessId;
 
       const { data: vehicleData, error: vehicleError } = await supabase
         .from('vehicles')
@@ -127,7 +134,7 @@ export const DataService = {
             start_date: plan.start_date,
             down_payment: plan.down_payment || 0
       };
-      if (businessId) planPayload.business_id = businessId;
+      if (resolvedBusinessId) planPayload.business_id = resolvedBusinessId;
 
       const { error: planError } = await supabase
         .from('installment_plans')
@@ -143,8 +150,8 @@ export const DataService = {
     }
   },
 
-  async getActiveVehicles() {
-    const businessId = await this.getBusinessId();
+  async getActiveVehicles(businessId?: string) {
+    const resolvedBusinessId = businessId || await this.getBusinessId();
     
     let query = supabase
       .from('vehicles')
@@ -154,8 +161,8 @@ export const DataService = {
         installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency )
       `);
     
-    if (businessId) {
-      query = query.eq('business_id', businessId);
+    if (resolvedBusinessId) {
+      query = query.eq('business_id', resolvedBusinessId);
     }
       
     const { data, error } = await query;
@@ -391,29 +398,27 @@ export const DataService = {
       return data;
   },
 
-  async getBusinessConfig() {
-      const newSchema = await isNewSchemaAvailable();
-      
-      if (newSchema) {
-          const businessId = await this.getBusinessId();
-          if (businessId) {
-              const { data: bizData } = await supabase
-                  .from('businesses')
-                  .select('*')
-                  .eq('id', businessId)
-                  .single();
-              
-              if (bizData) {
-                  return {
-                      business_name: bizData.name,
-                      nit: bizData.nit,
-                      address: bizData.address,
-                      phone: bizData.phone,
-                      logo_url: bizData.logo_url,
-                  };
-              }
-          }
-      }
+async getBusinessConfig(businessId?: string) {
+    const newSchema = await isNewSchemaAvailable();
+    const resolvedBusinessId = businessId || await this.getBusinessId();
+
+    if (newSchema && resolvedBusinessId) {
+        const { data: bizData } = await supabase
+            .from('businesses')
+            .select('*')
+            .eq('id', resolvedBusinessId)
+            .single();
+
+        if (bizData) {
+            return {
+                business_name: bizData.name,
+                nit: bizData.nit,
+                address: bizData.address,
+                phone: bizData.phone,
+                logo_url: bizData.logo_url,
+            };
+        }
+    }
 
       const { data, error } = await supabase
           .from('business_config')
@@ -427,25 +432,25 @@ export const DataService = {
       return data;
   },
 
-  async saveBusinessConfig(config: any) {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("No user logged in");
+async saveBusinessConfig(config: any, businessId?: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error("No user logged in");
 
-      const newSchema = await isNewSchemaAvailable();
-      
-      if (newSchema) {
-          const businessId = await this.getBusinessId();
-          if (businessId) {
-              const { data, error } = await supabase
-                  .from('businesses')
-                  .update({
-                      name: config.business_name,
-                      nit: config.nit,
-                      address: config.address,
-                      phone: config.phone,
-                      updated_at: new Date().toISOString(),
-                  })
-                  .eq('id', businessId)
+    const newSchema = await isNewSchemaAvailable();
+
+    if (newSchema) {
+        const resolvedBusinessId = businessId || await this.getBusinessId();
+        if (resolvedBusinessId) {
+            const { data, error } = await supabase
+                .from('businesses')
+                .update({
+                    name: config.business_name,
+                    nit: config.nit,
+                    address: config.address,
+                    phone: config.phone,
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('id', resolvedBusinessId)
                   .select()
                   .single();
 
@@ -510,17 +515,17 @@ export const DataService = {
       return logoUrl;
   },
 
-  async getPaymentPlanTemplates(): Promise<PaymentPlanTemplate[]> {
-      const businessId = await this.getBusinessId();
-      
-      let query = supabase
-          .from('payment_plan_templates')
-          .select('*')
-          .order('created_at', { ascending: true });
+async getPaymentPlanTemplates(businessId?: string): Promise<PaymentPlanTemplate[]> {
+    const resolvedBusinessId = businessId || await this.getBusinessId();
 
-      if (businessId) {
-          query = query.eq('business_id', businessId);
-      }
+    let query = supabase
+        .from('payment_plan_templates')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+    if (resolvedBusinessId) {
+        query = query.eq('business_id', resolvedBusinessId);
+    }
 
       const { data, error } = await query;
       if (error) throw error;

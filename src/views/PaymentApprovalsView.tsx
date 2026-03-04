@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { DataService } from '@/services/DataService';
@@ -105,7 +106,7 @@ export const PaymentApprovalsView = () => {
             </div>
 
             {loading ? (
-                <div className="text-center py-8">Cargando pagos pendientes...</div>
+                <LoadingScreen message="Cargando pagos pendientes..." inline />
             ) : pendingPayments.length === 0 ? (
                 <Card>
                     <CardContent className="py-12 text-center">

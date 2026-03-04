@@ -26,35 +26,25 @@
       "static/chunks/main-app.js",
       "static/chunks/app/dashboard/page.js"
     ],
-    "/aprobaciones/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/aprobaciones/page.js"
-    ],
     "/balance/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/balance/page.js"
     ],
-    "/usuarios/page": [
+    "/aprobaciones/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/usuarios/page.js"
-    ],
-    "/configuracion/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/configuracion/page.js"
+      "static/chunks/app/aprobaciones/page.js"
     ],
     "/registros/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/registros/page.js"
     ],
-    "/nueva-entrega/page": [
+    "/configuracion/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/nueva-entrega/page.js"
+      "static/chunks/app/configuracion/page.js"
     ]
   }
 }

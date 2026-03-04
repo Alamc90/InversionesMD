@@ -11,36 +11,28 @@ import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/config/supabaseClient';
 import { toast } from 'sonner';
 import { Building2 } from 'lucide-react';
+import { LoadingScreen } from '@/components/LoadingScreen';
 
 export default function SetupNegocioPage() {
     const router = useRouter();
-    const { session, business, refreshMembership } = useAuth();
+    const { session, business, refreshMembership, loading: authLoading } = useAuth();
     const [loading, setLoading] = useState(false);
-    const [authLoading, setAuthLoading] = useState(true);
-    
+
     const [businessName, setBusinessName] = useState('');
     const [nit, setNit] = useState('');
     const [address, setAddress] = useState('');
     const [phone, setPhone] = useState('');
 
     useEffect(() => {
-        const check = async () => {
-            const { data: { session: s } } = await supabase.auth.getSession();
-            if (!s) {
+        if (!authLoading) {
+            if (!session) {
                 router.replace('/login');
-                return;
+            } else if (business) {
+                router.replace('/dashboard');
             }
-            setAuthLoading(false);
-        };
-        check();
-    }, [router]);
-
-    useEffect(() => {
-        // If already has a business, redirect to dashboard
-        if (!authLoading && business) {
-            router.replace('/dashboard');
         }
-    }, [authLoading, business, router]);
+    }, [authLoading, session, business, router]);
+
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -75,8 +67,8 @@ export default function SetupNegocioPage() {
         }
     };
 
-    if (authLoading) {
-        return <div className="flex items-center justify-center min-h-screen">Cargando...</div>;
+    if (authLoading || !session || business) {
+        return <LoadingScreen message={business ? 'Redirigiendo al dashboard...' : 'Cargando...'} />;
     }
 
     return (

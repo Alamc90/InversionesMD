@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { MainLayout } from '@/components/MainLayout';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -16,19 +17,20 @@ import { parseCurrency, formatCurrency } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserManagementView } from '@/views/UserManagementView';
+import { PrinterSetup } from '@/components/PrinterSetup';
 import Image from 'next/image';
 
 export default function ConfigurationPage() {
     const router = useRouter();
-    const { hasPermission, refreshMembership } = useAuth();
+    const { hasPermission, refreshMembership, business } = useAuth();
     const showUsers = hasPermission('can_manage_users');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [uploadingLogo, setUploadingLogo] = useState(false);
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
-    const [logoPreview, setLogoPreview] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'business' | 'plans' | 'users'>('business');
-    
+    const [logoPreview, setLogoPreview] = useState<string | null>(null);        
+    const [activeTab, setActiveTab] = useState<'business' | 'plans' | 'printer' | 'users'>('business');
+
     // Config state
     const [config, setConfig] = useState<BusinessConfig>({
         business_name: '',
@@ -38,7 +40,7 @@ export default function ConfigurationPage() {
     });
 
     // Plans state
-    const [templates, setTemplates] = useState<PaymentPlanTemplate[]>([]);
+    const [templates, setTemplates] = useState<PaymentPlanTemplate[]>([]);      
     const [newTemplate, setNewTemplate] = useState<Partial<PaymentPlanTemplate>>({
         name: '',
         total_installments: 0,
@@ -49,8 +51,10 @@ export default function ConfigurationPage() {
 
     useEffect(() => {
         const loadAll = async () => {
+            if (!business?.id) return; // Wait for business context
+            
             try {
-                const data = await DataService.getBusinessConfig();
+                const data = await DataService.getBusinessConfig(business.id);
                 if (data) {
                     setConfig({
                         business_name: data.business_name || '',
@@ -62,7 +66,7 @@ export default function ConfigurationPage() {
                         setLogoUrl(data.logo_url);
                     }
                 }
-                const tp = await DataService.getPaymentPlanTemplates();
+                const tp = await DataService.getPaymentPlanTemplates(business.id);
                 setTemplates(tp);
             } catch (error) {
                 console.error("Error loading config", error);
@@ -71,7 +75,7 @@ export default function ConfigurationPage() {
             }
         };
         loadAll();
-    }, []);
+    }, [business?.id]);
 
     const handleConfigChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
@@ -82,7 +86,7 @@ export default function ConfigurationPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            await DataService.saveBusinessConfig(config);
+            await DataService.saveBusinessConfig(config, business?.id);
             // Refresh membership to update business name/logo in header
             await refreshMembership();
             toast.success("Configuración guardada exitosamente.");
@@ -130,7 +134,7 @@ export default function ConfigurationPage() {
     if (loading) {
         return (
             <MainLayout>
-                <div className="flex justify-center p-8">Cargando configuración...</div>
+                <LoadingScreen message="Cargando configuración..." inline />
             </MainLayout>
         );
     }
@@ -151,10 +155,18 @@ export default function ConfigurationPage() {
                             </li>
                             <li className="flex-1 md:flex-none">
                                 <button 
-                                    className={`w-full text-left px-4 py-3 ${showUsers ? 'border-b md:border-b' : ''} hover:bg-muted whitespace-nowrap ${activeTab === 'plans' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
+                                    className={`w-full text-left px-4 py-3 border-b md:border-b hover:bg-muted whitespace-nowrap ${activeTab === 'plans' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
                                     onClick={() => setActiveTab('plans')}
                                 >
                                     Planes de Pago
+                                </button>
+                            </li>
+                            <li className="flex-1 md:flex-none">
+                                <button 
+                                    className={`w-full text-left px-4 py-3 ${showUsers ? 'border-b md:border-b' : ''} hover:bg-muted whitespace-nowrap ${activeTab === 'printer' ? 'bg-muted md:border-l-4 md:border-l-primary border-b-2 border-b-primary md:border-b-0' : ''}`}
+                                    onClick={() => setActiveTab('printer')}
+                                >
+                                    Impresora
                                 </button>
                             </li>
                             {showUsers && (
@@ -284,6 +296,10 @@ export default function ConfigurationPage() {
 
                     {activeTab === 'users' && showUsers && (
                         <UserManagementView />
+                    )}
+
+                    {activeTab === 'printer' && (
+                        <PrinterSetup />
                     )}
 
                     {activeTab === 'plans' && (

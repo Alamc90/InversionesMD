@@ -5,19 +5,23 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { PaymentManager } from './PaymentManager';
 import { calculateOverdueInfo } from '@/lib/paymentUtils';
+import { useAuth } from '@/contexts/AuthContext';
 
 export const MotorcycleList: React.FC = () => {
+    const { business } = useAuth();
     const [vehicles, setVehicles] = useState<any[]>([]);
     const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
 
     useEffect(() => {
-        loadData();
-    }, [selectedVehicleId]); // Reload when modal closes/changes
+        if (business?.id) {
+            loadData();
+        }
+    }, [business?.id, selectedVehicleId]); // Reload when modal closes/changes
 
     const loadData = async () => {
         try {
-            const data = await DataService.getActiveVehicles();
+            const data = await DataService.getActiveVehicles(business?.id);
             setVehicles(data || []);
         } catch (error) {
             console.error(error);
@@ -104,7 +108,7 @@ export const MotorcycleList: React.FC = () => {
                                         <div className="flex justify-between text-sm">
                                             <span className="text-muted-foreground">Progreso de Pago</span>
                                             <span className="font-medium">
-                                                {Math.floor(installmentsPaid)} / {totalInstallments}
+                                                {installmentsPaid % 1 === 0 ? installmentsPaid : installmentsPaid.toFixed(2)} / {totalInstallments}
                                             </span>
                                         </div>
                                         <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">

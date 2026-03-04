@@ -1,24 +1,108 @@
 "use client"
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Button } from "@/components/ui/button"
 import { supabase } from '@/config/supabaseClient';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Session } from '@supabase/supabase-js';
-import { Settings, DollarSign, ClipboardCheck, Menu, X, Plus, LayoutDashboard, FileText, LogOut } from 'lucide-react';
+import { Settings, DollarSign, ClipboardCheck, Menu, X, Plus, LayoutDashboard, FileText, LogOut, WifiOff, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { PrinterStatusBadge } from '@/components/PrinterSetup';
+import { LoadingScreen } from '@/components/LoadingScreen';
+import { Card, CardContent } from '@/components/ui/card';
+import { autoReconnectPrinter, getSavedPrinterInfo, getPrinterStatus } from '@/lib/thermalPrinter';
 
 export const MainLayout = ({ children }: { children: React.ReactNode }) => {
     const router = useRouter();
     const pathname = usePathname();
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-    const { session, business, hasPermission, isAdmin, loading: authLoading, membership, tablesNotReady } = useAuth();
+    const { session, business, hasPermission, isAdmin, loading: authLoading, membership, tablesNotReady, connectionFailed, refreshMembership } = useAuth();
+    const prevPathname = useRef(pathname);
 
     // Close mobile menu on route change
     useEffect(() => {
         setMobileMenuOpen(false);
     }, [pathname]);
+
+    // Auto-reconnect saved printer on app mount
+    useEffect(() => {
+        const saved = getSavedPrinterInfo();
+        if (saved && !getPrinterStatus().connected) {
+            autoReconnectPrinter().then((ok) => {
+                if (ok) {
+                    console.log(`[MainLayout] Impresora ${saved.name} reconectada automáticamente`);
+                }
+            }).catch(() => {});
+        }
+    }, []);
+
+    // Auto-reload on navigation when data is stale (connection failed or no business)
+    useEffect(() => {
+        if (prevPathname.current !== pathname) {
+            prevPathname.current = pathname;
+            if (session && (connectionFailed || (!business && !tablesNotReady && !authLoading))) {
+                console.log('[MainLayout] Stale data detected on navigation, reloading...');
+                window.location.href = pathname;
+                return;
+            }
+        }
+    }, [pathname, session, connectionFailed, business, tablesNotReady, authLoading]);
+
+    // Auto-reload when tab regains focus after inactivity
+    // This prevents the stale connection issue — reload BEFORE broken fetches start
+    useEffect(() => {
+        let lastActive = Date.now();
+
+        const handleVisibility = () => {
+            if (document.visibilityState === 'visible') {
+                const elapsed = Date.now() - lastActive;
+                // After 2 minutes of inactivity, always do a hard reload
+                // This ensures Supabase connections are fresh
+                if (elapsed > 2 * 60 * 1000) {
+                    console.log(`[MainLayout] Tab was inactive for ${Math.round(elapsed / 1000)}s, reloading page...`);
+                    window.location.reload();
+                    return;
+                }
+                lastActive = Date.now();
+            } else {
+                lastActive = Date.now();
+            }
+        };
+
+        // Also listen for user interaction after potential idle
+        let idleTimer: NodeJS.Timeout | null = null;
+        let isIdle = false;
+
+        const resetIdle = () => {
+            if (isIdle) {
+                // User just interacted after being idle — check if we need to reload
+                isIdle = false;
+                if (connectionFailed || (!business && !tablesNotReady && session)) {
+                    console.log('[MainLayout] User returned from idle with stale data, reloading...');
+                    window.location.reload();
+                    return;
+                }
+            }
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                isIdle = true;
+            }, 90000); // Mark as idle after 90s of no interaction
+        };
+
+        document.addEventListener('visibilitychange', handleVisibility);
+        document.addEventListener('mousedown', resetIdle);
+        document.addEventListener('keydown', resetIdle);
+        document.addEventListener('touchstart', resetIdle);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibility);
+            document.removeEventListener('mousedown', resetIdle);
+            document.removeEventListener('keydown', resetIdle);
+            document.removeEventListener('touchstart', resetIdle);
+            if (idleTimer) clearTimeout(idleTimer);
+        };
+    }, [session, connectionFailed, business, tablesNotReady, refreshMembership]);
 
     useEffect(() => {
         if (!authLoading && !session) {
@@ -26,23 +110,87 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
         }
     }, [authLoading, session, router]);
 
-    useEffect(() => {
-        if (!authLoading && session && !business && !tablesNotReady) {
-            router.replace('/setup-negocio');
-        }
-    }, [authLoading, session, business, tablesNotReady, router]);
+    // No automatic redirect to setup-negocio — handled inline below
 
     const handleLogout = async () => {
         setMobileMenuOpen(false);
-        await supabase.auth.signOut();
-        router.push('/login');
+        try {
+            await supabase.auth.signOut();
+        } catch (e) {
+            console.warn('[MainLayout] Error en signOut:', e);
+        }
+        window.location.href = '/login';
     };
 
     if (authLoading) {
-        return <div className="flex items-center justify-center min-h-screen">Cargando sesión...</div>;
+        return <LoadingScreen message="Cargando sesión..." submessage="Verificando permisos" />;
     }
 
     if (!session) return null;
+
+    // Connection failed: show retry UI
+    if (connectionFailed && !business) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-background">
+                <div className="flex flex-col items-center gap-5 animate-fade-in max-w-sm text-center px-4">
+                    <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
+                        <WifiOff className="h-8 w-8 text-orange-500" />
+                    </div>
+                    <div>
+                        <h2 className="text-lg font-semibold mb-1">Problema de conexión</h2>
+                        <p className="text-sm text-muted-foreground">
+                            No se pudo conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.
+                        </p>
+                    </div>
+                    <div className="flex gap-3">
+                        <Button onClick={() => refreshMembership()} className="gap-2">
+                            <RefreshCw className="h-4 w-4" />
+                            Reintentar
+                        </Button>
+                        <Button variant="outline" onClick={() => window.location.reload()}>
+                            Recargar página
+                        </Button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    // No business found (successful query, truly no business) — show retry
+    if (!business && !tablesNotReady) {
+        return (
+            <div className="flex items-center justify-center min-h-screen bg-background">
+                <Card className="max-w-md w-full mx-4 animate-fade-in">
+                    <CardContent className="pt-6">
+                        <div className="flex flex-col items-center gap-4 text-center">
+                            <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
+                                <WifiOff className="h-8 w-8 text-orange-500" />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-semibold mb-1">No se pudo cargar tu negocio</h2>
+                                <p className="text-sm text-muted-foreground">
+                                    Puede ser un problema de conexión. Intenta de nuevo.
+                                </p>
+                            </div>
+                            <div className="flex gap-3 w-full">
+                                <Button className="flex-1" onClick={() => refreshMembership()} >
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                    Reintentar
+                                </Button>
+                                <Button variant="outline" onClick={() => window.location.reload()}>
+                                    Recargar
+                                </Button>
+                            </div>
+                            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground">
+                                <LogOut className="h-4 w-4 mr-1" />
+                                Cerrar sesión
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
 
     const showApprovals = hasPermission('can_approve_payments');
     const showBalance = hasPermission('can_view_balance');
@@ -80,6 +228,8 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
                                 {isAdmin ? 'Admin' : 'Empleado'}
                             </span>
                         )}
+                        <PrinterStatusBadge />
+                        <PrinterStatusBadge />
                     </div>
 
                     {/* Desktop Navigation */}

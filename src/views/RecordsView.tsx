@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -105,7 +106,7 @@ export const RecordsView = () => {
                     </CardHeader>
                     <CardContent>
                         {loading ? (
-                            <p>Cargando...</p>
+                            <LoadingScreen message="Cargando registros..." inline />
                         ) : activeTab === 'clientes' ? (
                             <div className="overflow-x-auto -mx-4 sm:mx-0">
                             <Table className="min-w-[500px]">

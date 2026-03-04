@@ -3,203 +3,282 @@ import { Customer } from "@/models/Customer";
 import { Vehicle } from "@/models/Vehicle";
 import { formatCurrency } from "./utils";
 import { calculateOverdueInfo } from "./paymentUtils";
+import {
+  buildESCPOSReceipt,
+  printDirect,
+  isPrinterConnected,
+  ReceiptData,
+} from "./thermalPrinter";
 
 interface PrintReceiptProps {
-  payment: any; // Payment history record
+  payment: any;
   customer: Customer;
   vehicle: Vehicle;
-  plan: any; // Installment plan
+  plan: any;
   businessConfig: BusinessConfig | null;
   logoUrl?: string | null;
 }
 
-export const printReceipt = ({
-  payment,
-  customer,
-  vehicle,
-  plan,
-  businessConfig,
-  logoUrl,
-}: PrintReceiptProps) => {
-  const width = "58mm";
-  // Optimize styles for narrow 58mm paper. 
-  // Font size reduced slightly, margins minimal.
-  const styles = `
-    @page {
-      size: 58mm auto;
-      margin: 0;
-    }
-    body {
-      margin: 0;
-      padding: 2mm;
-      font-family: 'Courier New', Courier, monospace;
-      font-size: 11px;
-      width: ${width};
-      color: #000;
-      background-color: #fff;
-    }
-    .header {
-      text-align: center;
-      margin-bottom: 5px;
-    }
-    .header h2 {
-      margin: 0;
-      font-size: 14px;
-      font-weight: bold;
-      text-transform: uppercase;
-    }
-    .header .logo {
-      max-width: 40mm;
-      max-height: 15mm;
-      margin: 0 auto 3px auto;
-      display: block;
-      object-fit: contain;
-    }
-    .header p {
-      margin: 1px 0;
-      font-size: 11px;
-    }
-    .divider {
-      border-top: 1px dashed #000;
-      margin: 5px 0;
-      width: 100%;
-    }
-    .content-row {
-      display: flex;
-      justify-content: space-between;
-      margin: 2px 0;
-      width: 100%;
-    }
-    .label {
-      font-weight: bold;
-    }
-    .total-section {
-      margin-top: 8px;
-      margin-bottom: 8px;
-      font-size: 14px;
-      font-weight: bold;
-      text-align: right;
-    }
-    .footer {
-      text-align: center;
-      margin-top: 10px;
-      font-size: 10px;
-    }
-    /* Utility for centering text blocks manually if flex fails in some contexts, but flex is generally fine */
-    .center-text {
-        text-align: center;
-    }
-  `;
+// ─── Build receipt data (shared between HTML and ESC/POS) ────────────────
+
+function buildReceiptData(props: PrintReceiptProps): ReceiptData {
+  const { payment, customer, vehicle, plan, businessConfig } = props;
 
   const date = new Date(payment.payment_date).toLocaleDateString("es-CO");
   const time = new Date(payment.payment_date).toLocaleTimeString("es-CO", {
     hour: "2-digit",
     minute: "2-digit",
   });
-  
-  // Calculate installments paid with this amount approximately, or just show current status
-  // The receipt shows "# Pagos: 6 | Valor Cuota: 35,000"
-  // We can calculate how many installments this payment covers
+
   const installmentValue = Number(plan?.installment_value) || 0;
   const amountPaid = Number(payment.amount) || 0;
-  const installmentsInThisPayment = installmentValue > 0 
-    ? (amountPaid / installmentValue).toFixed(1) 
-    : '0';
+  const installmentsInPayment =
+    installmentValue > 0 ? amountPaid / installmentValue : 0;
+  const installmentsDisplay =
+    installmentsInPayment % 1 === 0
+      ? Math.floor(installmentsInPayment).toString()
+      : installmentsInPayment.toFixed(1);
 
-  // Format currency without decimals for cleaner receipt if needed, using standard formatter
-  const format = (val: number) => formatCurrency(val);
-
-  // Calculate overdue status
   const overdueInfo = calculateOverdueInfo(plan);
   const overdueInstallments = Math.floor(overdueInfo.overdueInstallments);
-  
-  const statusText = overdueInstallments > 0 
-    ? `${overdueInstallments} Cuota(s) Vencida(s)` 
-    : "Al día";
+  const statusText =
+    overdueInstallments > 0
+      ? `${overdueInstallments} Cuota(s) Vencida(s)`
+      : "Al dia";
 
-  const htmlContent = `
-    <html>
-      <head>
-        <title>Recibo #${payment.id}</title>
-        <style>${styles}</style>
-      </head>
-      <body>
-        <div class="header">
-          ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo" />` : ''}
-          <h2>${businessConfig?.business_name || "MI NEGOCIO"}</h2>
-          <p>NIT: ${businessConfig?.nit || "0000000000"}</p>
-          <p>${businessConfig?.address || "Dirección Principal"}</p>
-          <p>${businessConfig?.phone || ""}</p>
-        </div>
+  return {
+    businessName: businessConfig?.business_name || "MI NEGOCIO",
+    nit: businessConfig?.nit || "0000000000",
+    address: businessConfig?.address || "",
+    phone: businessConfig?.phone || "",
+    date,
+    time,
+    receiptNumber: payment.id,
+    customerName: `${customer.first_name} ${customer.last_name}`,
+    cedula: customer.cedula || "",
+    plate: vehicle.plate || "",
+    installmentsCount: installmentsDisplay,
+    installmentValue: formatCurrency(installmentValue),
+    totalPayment: formatCurrency(amountPaid),
+    statusText,
+  };
+}
 
-        <div class="divider"></div>
+// ─── Direct ESC/POS Printing ─────────────────────────────────────────────
 
-        <div class="content-row">
-          <span>Fecha: ${date} ${time}</span>
-        </div>
-        <div class="content-row">
-          <span>Recibo #: ${payment.id}</span>
-        </div>
+export async function printReceiptDirect(
+  props: PrintReceiptProps
+): Promise<boolean> {
+  if (!isPrinterConnected()) {
+    return false;
+  }
 
-        <div class="divider"></div>
+  const data = buildReceiptData(props);
+  const escposBytes = buildESCPOSReceipt(data);
+  await printDirect(escposBytes);
+  return true;
+}
 
-        <div style="margin-bottom: 5px;">
-          <div class="label">Cliente:</div>
-          <div>${customer.first_name} ${customer.last_name}</div>
-        </div>
-        
-        <div class="content-row">
-          <span class="label">CC:</span>
-          <span>${customer.cedula}</span>
-        </div>
+// ─── HTML Fallback for browser printing ──────────────────────────────────
+// Optimized for 58mm (≈48mm printable area) thermal receipt printers.
+// Uses table-cell layout and monospace font to prevent overflow.
 
-        <div class="content-row">
-          <span class="label">Placa:</span>
-          <span>${vehicle.plate}</span>
-        </div>
+export const printReceipt = (props: PrintReceiptProps) => {
+  const { logoUrl } = props;
+  const d = buildReceiptData(props);
 
-        <div class="divider"></div>
-
-        <div class="content-row">
-            <span>Cant. Cuotas:</span>
-            <span>${Number(installmentsInThisPayment) % 1 === 0 ? Math.floor(Number(installmentsInThisPayment)) : installmentsInThisPayment}</span>
-        </div>
-        <div class="content-row">
-            <span>Valor Cuota:</span>
-            <span>${format(installmentValue)}</span>
-        </div>
-
-        <div class="total-section">
-          Total Pago: ${format(amountPaid)}
-        </div>
-        
-        <div class="content-row" style="align-items: flex-start;">
-             <span style="font-weight:bold; white-space: nowrap; margin-right: 5px;">Estado:</span>
-             <span style="text-align: right;">${statusText}</span>
-        </div>
-
-        <div class="footer">
-          <p>Gracias por su preferencia</p>
-          <p>${businessConfig?.business_name || "Equipo Vehículos"}</p>
-        </div>
-        
-        <script>
-            window.onload = function() {
-                window.print();
-                // Optional: close window after print? 
-                // window.close();
-            }
-        </script>
-      </body>
-    </html>
+  const styles = `
+    @page {
+      size: 48mm auto;
+      margin: 0;
+    }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      width: 48mm;
+      max-width: 48mm;
+      margin: 0 auto;
+      padding: 1mm 0.5mm;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 10px;
+      line-height: 1.3;
+      color: #000;
+      background: #fff;
+      overflow: hidden;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+    }
+    .center { text-align: center; }
+    .bold { font-weight: bold; }
+    .title {
+      font-size: 13px;
+      font-weight: bold;
+      text-align: center;
+      text-transform: uppercase;
+      margin-bottom: 1px;
+    }
+    .subtitle {
+      text-align: center;
+      font-size: 9px;
+      line-height: 1.2;
+    }
+    .logo {
+      max-width: 36mm;
+      max-height: 12mm;
+      display: block;
+      margin: 0 auto 2px auto;
+      object-fit: contain;
+    }
+    .sep {
+      border: none;
+      border-top: 1px dashed #000;
+      margin: 3px 0;
+    }
+    .row {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+      font-size: 10px;
+    }
+    .row .lbl {
+      display: table-cell;
+      font-weight: bold;
+      white-space: nowrap;
+      width: 45%;
+      padding-right: 2px;
+      vertical-align: top;
+    }
+    .row .val {
+      display: table-cell;
+      text-align: right;
+      width: 55%;
+      word-break: break-all;
+      vertical-align: top;
+    }
+    .row .val-left {
+      display: table-cell;
+      text-align: left;
+      width: 55%;
+      word-break: break-word;
+      vertical-align: top;
+    }
+    .field-block {
+      font-size: 10px;
+      word-break: break-word;
+      padding-left: 1px;
+      margin-bottom: 1px;
+    }
+    .total-box {
+      text-align: center;
+      font-size: 14px;
+      font-weight: bold;
+      padding: 3px 0;
+      margin: 2px 0;
+    }
+    .footer {
+      text-align: center;
+      font-size: 9px;
+      margin-top: 5px;
+      line-height: 1.3;
+    }
+    @media print {
+      body { width: 48mm; max-width: 48mm; }
+    }
   `;
 
-  // Use a smaller window size for preview to match physics
-  const printWindow = window.open("", "_blank", "width=350,height=600,menubar=0,toolbar=0,location=0,status=0");
+  const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Recibo #${d.receiptNumber}</title>
+<style>${styles}</style>
+</head>
+<body>
+
+<div class="center">
+  ${logoUrl ? `<img src="${logoUrl}" class="logo" alt="Logo" />` : ""}
+  <div class="title">${d.businessName}</div>
+  <div class="subtitle">NIT: ${d.nit}</div>
+  <div class="subtitle">${d.address}</div>
+  ${d.phone ? `<div class="subtitle">${d.phone}</div>` : ""}
+</div>
+
+<hr class="sep">
+
+<div class="row">
+  <span class="lbl">Fecha:</span>
+  <span class="val">${d.date}</span>
+</div>
+<div class="row">
+  <span class="lbl">Hora:</span>
+  <span class="val">${d.time}</span>
+</div>
+<div class="row">
+  <span class="lbl">Recibo #:</span>
+  <span class="val">${d.receiptNumber}</span>
+</div>
+
+<hr class="sep">
+
+<div class="bold" style="font-size:10px;">Cliente:</div>
+<div class="field-block">${d.customerName}</div>
+
+<div class="row">
+  <span class="lbl">CC:</span>
+  <span class="val">${d.cedula}</span>
+</div>
+<div class="row">
+  <span class="lbl">Placa:</span>
+  <span class="val">${d.plate}</span>
+</div>
+
+<hr class="sep">
+
+<div class="row">
+  <span class="lbl">Cant. Cuotas:</span>
+  <span class="val">${d.installmentsCount}</span>
+</div>
+<div class="row">
+  <span class="lbl">Valor Cuota:</span>
+  <span class="val">$${d.installmentValue}</span>
+</div>
+
+<hr class="sep">
+
+<div class="total-box">
+  Total: $${d.totalPayment}
+</div>
+
+<hr class="sep">
+
+<div class="bold" style="font-size:10px;">Estado:</div>
+<div class="field-block">${d.statusText}</div>
+
+<div class="footer">
+  Gracias por su preferencia<br>
+  ${d.businessName}
+</div>
+
+<script>
+window.onload = function() {
+  setTimeout(function() { window.print(); }, 300);
+};
+</script>
+</body>
+</html>`;
+
+  const printWindow = window.open(
+    "",
+    "_blank",
+    "width=300,height=600,menubar=0,toolbar=0,location=0,status=0"
+  );
   if (printWindow) {
     printWindow.document.write(htmlContent);
     printWindow.document.close();
   } else {
-    alert("Permita las ventanas emergentes para imprimir el recibo");
+    alert("Permita las ventanas emergentes para imprimir el recibo.");
   }
 };

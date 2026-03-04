@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -66,12 +67,31 @@ export const UserManagementView = () => {
         if (!business?.id) return;
 
         try {
+            // 1. Guardar la invitación en la base de datos
             await BusinessService.createInvitation(
                 business.id,
                 inviteEmail,
                 inviteRole,
                 invitePermissions
             );
+
+            // 2. Disparar el correo de invitación a través de nuestra API Route
+            try {
+                const response = await fetch('/api/invite', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ email: inviteEmail }),
+                });
+
+                if (!response.ok) {
+                    console.warn("La invitación se guardó, pero hubo un error enviando el correo. ¿Falta SUPABASE_SERVICE_ROLE_KEY?");
+                }
+            } catch (mailError) {
+                console.error("Error contactando a la API de correos:", mailError);
+            }
+
             toast.success(`Invitación enviada a ${inviteEmail}`);
             setShowInviteDialog(false);
             setInviteEmail('');
@@ -180,7 +200,7 @@ export const UserManagementView = () => {
                 </CardHeader>
                 <CardContent>
                     {loading ? (
-                        <p>Cargando...</p>
+                        <LoadingScreen message="Cargando miembros..." inline />
                     ) : (
                         <div className="overflow-x-auto -mx-4 sm:mx-0">
                         <Table className="min-w-[550px]">

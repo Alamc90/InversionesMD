@@ -9,8 +9,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { formatCurrency, parseCurrency } from "@/lib/utils";
 import { calculateOverdueInfo } from "@/lib/paymentUtils";
 import { toast } from "sonner"
-import { Info, User, Car, ShieldCheck, Printer, Clock, CheckCircle, XCircle } from "lucide-react"
-import { printReceipt } from "@/lib/receiptPrinter";
+import { Info, User, Car, ShieldCheck, Printer, Clock, CheckCircle, XCircle, Edit3 } from "lucide-react"
+import { printReceipt, printReceiptDirect } from "@/lib/receiptPrinter";
+import { isPrinterConnected } from "@/lib/thermalPrinter";
 import { BusinessConfig } from "@/models/BusinessConfig";
 import { useAuth } from '@/contexts/AuthContext';
 import { PAYMENT_STATUS_LABELS, PAYMENT_STATUS_COLORS, PaymentStatus } from '@/models/Payment';
@@ -33,6 +34,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const [paymentNote, setPaymentNote] = useState('');
     const [showDetails, setShowDetails] = useState(false);
     const [businessConfig, setBusinessConfig] = useState<BusinessConfig | null>(null);
+    const [showCustomAmount, setShowCustomAmount] = useState(false);
 
     useEffect(() => {
         if (isOpen && vehicleId) {
@@ -371,7 +373,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                     </div>
                                      <div className="flex justify-between items-center py-0.5 border-t">
                                         <span className="text-muted-foreground text-sm">Progreso:</span>
-                                        <span className="font-medium font-bold text-right">{Math.floor(installmentsPaid)} / {totalInstallments}</span>
+                                        <span className="font-medium font-bold text-right">{installmentsPaid % 1 === 0 ? installmentsPaid : installmentsPaid.toFixed(2)} / {totalInstallments}</span>
                                     </div>
                                 </div>
                             </CardContent>
@@ -395,26 +397,53 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                             
                             
                                 <div className="space-y-4">
-                                    <span className="text-sm font-medium">Seleccione Opción de Pago</span>
-                                    <div className="flex gap-2">
+                                    <span className="text-sm font-medium">Selección de Pago</span>
+                                    <div className="flex gap-2 flex-wrap">
                                         <Button 
-                                            variant={Math.abs(paymentAmount - installmentVal) < 1 ? "default" : "outline"}
+                                            variant={!showCustomAmount && Math.abs(paymentAmount - installmentVal) < 1 ? "default" : "outline"}
                                             className="flex-1"
-                                            onClick={paySingleInstallment} 
+                                            onClick={() => { paySingleInstallment(); setShowCustomAmount(false); }} 
                                         >
                                             1 Cuota ({formatCurrency(installmentVal)})
                                         </Button>
                                         
                                         {overdueInfo.overdueInstallments > 0 && (
                                             <Button 
-                                                variant={Math.abs(paymentAmount - (installmentVal * overdueInfo.overdueInstallments)) < 1 ? "destructive" : "outline"}
+                                                variant={!showCustomAmount && Math.abs(paymentAmount - (installmentVal * overdueInfo.overdueInstallments)) < 1 ? "destructive" : "outline"}
                                                 className="flex-1"
-                                                onClick={payPendingInstallments} 
+                                                onClick={() => { payPendingInstallments(); setShowCustomAmount(false); }} 
                                             >
                                                 Pendientes ({formatCurrency(installmentVal * overdueInfo.overdueInstallments)})
                                             </Button>
                                         )}
+
+                                        <Button
+                                            variant={showCustomAmount ? "secondary" : "outline"}
+                                            className="flex-1"
+                                            onClick={() => setShowCustomAmount(true)}
+                                        >
+                                            <Edit3 className="h-4 w-4 mr-1" />
+                                            Personalizado
+                                        </Button>
                                     </div>
+
+                                    {showCustomAmount && (
+                                        <div className="space-y-2 animate-fade-in">
+                                            <label className="text-sm text-muted-foreground">Monto personalizado:</label>
+                                            <Input
+                                                type="text"
+                                                value={formatCurrency(paymentAmount)}
+                                                onChange={handleAmountChange}
+                                                placeholder="Ingrese el monto"
+                                                className="text-lg font-bold"
+                                            />
+                                            {installmentVal > 0 && (
+                                                <p className="text-xs text-muted-foreground">
+                                                    Equivale a <span className="font-semibold text-foreground">{(paymentAmount / installmentVal).toFixed(2)}</span> cuota{(paymentAmount / installmentVal) !== 1 ? 's' : ''}
+                                                </p>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="p-4 bg-muted rounded-lg flex justify-between items-center">
@@ -468,14 +497,27 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                                     variant="ghost" 
                                                     size="icon" 
                                                     title="Imprimir Recibo"
-                                                    onClick={() => printReceipt({
-                                                        payment: rec,
-                                                        customer: details.customers,
-                                                        vehicle: details,
-                                                        plan: details.installment_plans[0],
-                                                        businessConfig: businessConfig,
-                                                        logoUrl: business?.logo_url
-                                                    })}
+                                                    onClick={async () => {
+                                                        const receiptProps = {
+                                                            payment: rec,
+                                                            customer: details.customers,
+                                                            vehicle: details,
+                                                            plan: details.installment_plans[0],
+                                                            businessConfig: businessConfig,
+                                                            logoUrl: business?.logo_url
+                                                        };
+                                                        if (isPrinterConnected()) {
+                                                            try {
+                                                                await printReceiptDirect(receiptProps);
+                                                                toast.success('Recibo impreso');
+                                                            } catch (e: any) {
+                                                                toast.error('Error al imprimir: ' + e.message);
+                                                                printReceipt(receiptProps);
+                                                            }
+                                                        } else {
+                                                            printReceipt(receiptProps);
+                                                        }
+                                                    }}
                                                 >
                                                     <Printer className="h-4 w-4" />
                                                 </Button>
@@ -504,6 +546,11 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                 <span>Total a Pagar:</span>
                                 <span>{formatCurrency(paymentAmount)}</span>
                             </div>
+                            {installmentVal > 0 && (
+                                <div className="text-sm text-muted-foreground text-right">
+                                    Equivale a <span className="font-semibold text-foreground">{(paymentAmount / installmentVal).toFixed(2)}</span> cuota{(paymentAmount / installmentVal) !== 1 ? 's' : ''} de {formatCurrency(installmentVal)}
+                                </div>
+                            )}
                             {!canAutoApprove && (
                                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm text-yellow-700 flex items-center gap-2">
                                     <Clock className="h-4 w-4 shrink-0" />
