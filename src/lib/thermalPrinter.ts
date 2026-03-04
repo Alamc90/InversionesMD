@@ -182,7 +182,7 @@ interface PrinterConnection {
   type: PrinterType;
   device: any;
   writer?: WritableStreamDefaultWriter;
-  characteristic?: BluetoothRemoteGATTCharacteristic;
+  characteristic?: any; // BluetoothRemoteGATTCharacteristic (Web Bluetooth API)
   name?: string;
 }
 
@@ -322,7 +322,7 @@ async function autoReconnectBluetooth(saved: SavedPrinter): Promise<boolean> {
     // We need to request watchAdvertisements and wait, or try direct connect
     const server = await device.gatt.connect();
 
-    let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+    let characteristic: any = null;
     for (const serviceUUID of BT_SERVICES) {
       try {
         const service = await server.getPrimaryService(serviceUUID);
@@ -414,7 +414,7 @@ export async function connectBluetoothPrinter(): Promise<PrinterConnection> {
     const server = await device.gatt.connect();
     
     // Try each known service UUID
-    let characteristic: BluetoothRemoteGATTCharacteristic | null = null;
+    let characteristic: any = null;
     
     for (const serviceUUID of BT_SERVICES) {
       try {
@@ -460,7 +460,7 @@ async function sendToSerial(data: Uint8Array, writer: WritableStreamDefaultWrite
   await writer.write(data);
 }
 
-async function sendToBluetooth(data: Uint8Array, characteristic: BluetoothRemoteGATTCharacteristic) {
+async function sendToBluetooth(data: Uint8Array, characteristic: any) {
   // BLE has a max packet size (~20-512 bytes depending on device)
   // Send in chunks of 100 bytes to be safe
   const CHUNK_SIZE = 100;

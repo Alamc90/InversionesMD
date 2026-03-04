@@ -1,8 +1,15 @@
 {
-  "/dashboard/page": "app/dashboard/page.js",
-  "/registros/page": "app/registros/page.js",
-  "/balance/page": "app/balance/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/invite/route": "app/api/invite/route.js",
   "/aprobaciones/page": "app/aprobaciones/page.js",
+  "/balance/page": "app/balance/page.js",
   "/configuracion/page": "app/configuracion/page.js",
-  "/login/page": "app/login/page.js"
+  "/login/page": "app/login/page.js",
+  "/dashboard/page": "app/dashboard/page.js",
+  "/page": "app/page.js",
+  "/nueva-entrega/page": "app/nueva-entrega/page.js",
+  "/registros/page": "app/registros/page.js",
+  "/setup-negocio/page": "app/setup-negocio/page.js",
+  "/update-password/page": "app/update-password/page.js",
+  "/usuarios/page": "app/usuarios/page.js"
 }
