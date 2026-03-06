@@ -37,6 +37,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const [showCustomAmount, setShowCustomAmount] = useState(false);
     const [loadingData, setLoadingData] = useState(false);
     const [processing, setProcessing] = useState(false);
+    const [paymentType, setPaymentType] = useState<'regular' | 'down_payment'>('regular');
 
     useEffect(() => {
         if (isOpen && vehicleId) {
@@ -74,11 +75,15 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                     plan = { ...plan, ...freshPlan };
                 }
 
-                setHistory(records || []);
+                let allRecords = records || [];
+
+                setHistory(allRecords);
 
                 // Calculate progress manually from APROBADO payments only
                 const approvedPayments = (records || []).filter((r: any) => r.status === 'APROBADO');
-                const totalPaid = approvedPayments.reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
+                const regularPayments = approvedPayments.filter((r: any) => !r.note?.toLowerCase().includes('cuota inicial'));
+                
+                const totalPaid = regularPayments.reduce((acc: number, curr: any) => acc + (Number(curr.amount) || 0), 0);
                 const instVal = Number(plan.installment_value) || 1;
                 const rawPaid = instVal > 0 ? (totalPaid / instVal) : 0;
                 const computedInstallmentsPaid = Number(rawPaid.toFixed(2));
@@ -107,9 +112,12 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     };
 
     // Kept for compatibility if used elsewhere, but loadData handles it now
-    const loadHistory = async (planId: number) => {
-        const records = await DataService.getPaymentHistory(planId);
-        setHistory(records || []);
+    const loadHistory = async (plan: any) => {
+        const records = await DataService.getPaymentHistory(plan.id);
+        let allRecords = records || [];
+
+        setHistory(allRecords);
+        return allRecords;
     };
 
     const calculateOverdue = (plan: any) => {
@@ -161,7 +169,11 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
         
         setProcessing(true);
         try {
-            const result = await DataService.registerPayment(plans[0].id, paymentAmount, paymentNote, canAutoApprove);
+            const finalNote = paymentType === 'down_payment' 
+                ? 'Abono a Cuota Inicial' + (paymentNote ? ` - ${paymentNote}` : '') 
+                : paymentNote;
+
+            const result = await DataService.registerPayment(plans[0].id, paymentAmount, finalNote, canAutoApprove);
             
             if (canAutoApprove) {
                 toast.success('Pago registrado y aprobado correctamente');
@@ -207,7 +219,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                 calculateOverdue(updatedPlan);
                  
                 // Only reload history to show the new payment, avoid reloading full details which might be stale
-                await loadHistory(plans[0].id);
+                await loadHistory(plans[0]);
 
                 // If needed, we can trigger a full reload much later, but strictly speaking it's not necessary if we trust our local update
             } else {
@@ -246,6 +258,13 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const installmentVal = Number(plan?.installment_value) || 0;
     const installmentsPaid = Number(plan?.installments_paid) || 0;
     const totalInstallments = Number(plan?.total_installments) || 0;
+    
+    // Down payment calculation
+    const isDownPayment = (r: any) => r.note?.toLowerCase().includes('cuota inicial');
+    const downPaymentRecords = history.filter(r => r.status === 'APROBADO' && isDownPayment(r));
+    const totalDownPaymentPaid = downPaymentRecords.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+    const totalDownPayment = Number(plan?.down_payment) || 0;
+    const remainingDownPayment = Math.max(0, totalDownPayment - totalDownPaymentPaid);
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => {
@@ -399,6 +418,20 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                         <span className="text-muted-foreground text-sm">Progreso:</span>
                                         <span className="font-medium font-bold text-right">{installmentsPaid % 1 === 0 ? installmentsPaid : installmentsPaid.toFixed(2)} / {totalInstallments}</span>
                                     </div>
+                                    <div className="flex justify-between items-center py-0.5 border-t">
+                                        <span className="text-muted-foreground text-sm">Cuota Inicial Total:</span>
+                                        <span className="font-medium text-right">${totalDownPayment.toLocaleString()}</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-0.5 border-t">
+                                        <span className="text-muted-foreground text-sm">Cuota Inicial Pagada:</span>
+                                        <span className="font-medium text-green-600 text-right">${totalDownPaymentPaid.toLocaleString()}</span>
+                                    </div>
+                                    {remainingDownPayment > 0 && (
+                                        <div className="flex justify-between items-center py-0.5 border-t">
+                                            <span className="text-muted-foreground text-sm text-yellow-600 font-bold">Cuota Inicial Restante:</span>
+                                            <span className="font-medium text-yellow-600 font-bold text-right">${remainingDownPayment.toLocaleString()}</span>
+                                        </div>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
@@ -419,7 +452,38 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                 <span className="font-bold">{overdueInfo.nextDueDate}</span>
                             </div>
                             
+                                <div className="space-y-4">
+                                    <span className="text-sm font-medium">Tipo de Pago</span>
+                                    <div className="flex gap-2">
+                                        <label className={`flex-1 flex items-center justify-center p-2 rounded border cursor-pointer ${paymentType === 'regular' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}>
+                                            <input 
+                                                type="radio" 
+                                                name="paymentType" 
+                                                value="regular"
+                                                className="hidden"
+                                                checked={paymentType === 'regular'}
+                                                onChange={() => setPaymentType('regular')}
+                                            />
+                                            Cuota Regular
+                                        </label>
+                                        <label className={`flex-1 flex text-center items-center justify-center p-2 rounded border cursor-pointer ${paymentType === 'down_payment' ? 'bg-primary text-primary-foreground border-primary' : 'bg-background hover:bg-muted'}`}>
+                                            <input 
+                                                type="radio" 
+                                                name="paymentType" 
+                                                value="down_payment"
+                                                className="hidden"
+                                                checked={paymentType === 'down_payment'}
+                                                onChange={() => {
+                                                    setPaymentType('down_payment');
+                                                    if (remainingDownPayment > 0) setPaymentAmount(remainingDownPayment);
+                                                }}
+                                            />
+                                            Abono Cuota Inicial
+                                        </label>
+                                    </div>
+                                </div>
                             
+                                {paymentType === 'regular' && (
                                 <div className="space-y-4">
                                     <span className="text-sm font-medium">Selección de Pago</span>
                                     <div className="flex gap-2 flex-wrap">
@@ -469,6 +533,20 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                         </div>
                                     )}
                                 </div>
+                                )}
+                                
+                                {paymentType === 'down_payment' && (
+                                    <div className="space-y-2 animate-fade-in">
+                                        <label className="text-sm text-muted-foreground">Monto de abono:</label>
+                                        <Input
+                                            type="text"
+                                            value={formatCurrency(paymentAmount)}
+                                            onChange={handleAmountChange}
+                                            placeholder="Ingrese el abono a cuota inicial"
+                                            className="text-lg font-bold"
+                                        />
+                                    </div>
+                                )}
 
                                 <div className="p-4 bg-muted rounded-lg flex justify-between items-center">
                                     <span className="font-semibold">Monto a Pagar:</span>
@@ -570,7 +648,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                 <span>Total a Pagar:</span>
                                 <span>{formatCurrency(paymentAmount)}</span>
                             </div>
-                            {installmentVal > 0 && (
+                            {installmentVal > 0 && paymentType === 'regular' && (
                                 <div className="text-sm text-muted-foreground text-right">
                                     Equivale a <span className="font-semibold text-foreground">{(paymentAmount / installmentVal).toFixed(2)}</span> cuota{(paymentAmount / installmentVal) !== 1 ? 's' : ''} de {formatCurrency(installmentVal)}
                                 </div>

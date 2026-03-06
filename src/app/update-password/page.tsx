@@ -110,9 +110,9 @@ export default function UpdatePasswordPage() {
         <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">
              <Card className="w-full max-w-md">
                 <CardHeader className="text-center">
-                    <CardTitle className="text-2xl">Bienvenido, Crea tu Contraseña</CardTitle>
+                    <CardTitle className="text-2xl">Actualización de Contraseña</CardTitle>
                     <CardDescription>
-                        Ingrese su nueva contraseña para activar su cuenta
+                        Ingrese su nueva contraseña para actualizar su cuenta
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -181,7 +181,7 @@ export default function UpdatePasswordPage() {
                         </div>
 
                         <Button type="submit" className="w-full" disabled={loading}>
-                            {loading ? 'Creando cuenta...' : 'Crear Cuenta y Entrar'}
+                            {loading ? 'Actualizando...' : 'Actualizar Contraseña'}
                         </Button>
                     </form>
                 </CardContent>

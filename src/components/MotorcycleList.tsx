@@ -127,6 +127,16 @@ export const MotorcycleList: React.FC = () => {
                 })}
             </div>
 
+            {filteredVehicles.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground bg-slate-50 rounded-lg border border-dashed mt-4">
+                    <p className="text-lg font-medium">Aún no existen vehículos entregados</p>
+                    {searchQuery ? 
+                        <p className="text-sm mt-1">No se encontraron vehículos que coincidan con tu búsqueda.</p> :
+                        <p className="text-sm mt-1">Registra una nueva entrega para comenzar.</p>
+                    }
+                </div>
+            )}
+
             {selectedVehicleId && (
                 <PaymentManager 
                     vehicleId={selectedVehicleId} 

@@ -502,7 +502,7 @@ async saveBusinessConfig(config: any, businessId?: string) {
           .from('business-logos')
           .getPublicUrl(fileName);
 
-      const logoUrl = urlData.publicUrl;
+      const logoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
 
       // Save URL to business record
       if (newSchema && businessId) {
