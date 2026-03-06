@@ -48,7 +48,8 @@ export async function POST(request: Request) {
         });
 
         if (error) {
-            // Si ya existe en auth, la forma más contundente de reenviar acceso es mediante un Magic Link (OTP)
+            // Se usa Magic Link (OTP) para reenviar el acceso de forma rapida y permitir al usuario concluir
+            // su proceso en la pantalla de "registro".
             if (error.message.includes('already exists') || error.message.includes('registered')) {
                  const { error: otpError } = await supabaseAdmin.auth.signInWithOtp({
                       email: email,
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
                  });
                  if (otpError) throw otpError;
                  
-                 return NextResponse.json({ success: true, message: 'Se reenvió un enlace de acceso mágico a la cuenta existente.' });
+                 return NextResponse.json({ success: true, message: 'Se reenvió un enlace de acceso a la cuenta para continuar el registro.' });
             }
             throw error;
         }

@@ -123,10 +123,14 @@ export default function RegisterUserPage() {
             // Al establecer la sesión inicialmente en esta pantalla, AuthContext podría haber 
             // inscrito al usuario sin nombre. Forzamos la actualización de su registro.
             if (userData.user?.id) {
-                await supabase
+                const { error: updateError } = await supabase
                     .from('business_members')
                     .update({ display_name: fullName.trim() })
                     .eq('user_id', userData.user.id);
+                    
+                if (updateError) {
+                    console.error("Error al actualizar nombre en business_members:", updateError);
+                }
             }
 
             toast.success("Cuenta registrada correctamente. ¡Bienvenido!");

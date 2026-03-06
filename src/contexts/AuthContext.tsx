@@ -202,6 +202,12 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
                         .select('*, businesses(*)')
                         .single();
 
+                    // 409 means Conflict (The member already exists due to a parallel race condition)
+                    if (insertError && insertError.code === '23505') {
+                        console.log('[AuthContext] Member already inserted. Retrying fetch...');
+                        return fetchMembership(userId); // Loop back once
+                    }
+
                     if (!insertError && newMember) {
                         await supabase
                             .from('business_invitations')
