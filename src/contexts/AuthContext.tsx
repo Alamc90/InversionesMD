@@ -115,11 +115,12 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
     };
 
     try {
-        // Check membership (with retry for transient network errors)
+        // Check membership (with retry)
+        // Optimizacion: Evitar JOIN implicito para reducir carga en RLS
         const { data: memberData, error: memberError } = await withRetry(async () => {
             const result = await supabase
                 .from('business_members')
-                .select('*, businesses(*)')
+                .select('*')
                 .eq('user_id', userId)
                 .limit(1)
                 .maybeSingle();
@@ -151,10 +152,10 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
         }
 
         if (memberData) {
-            let biz = memberData.businesses as unknown as Business;
+            let biz: Business | null = null;
             
-            // If the join didn't return business data (RLS on businesses table), fetch separately
-            if (!biz || !biz.id) {
+            // Fetch business separately (RLS checks are safer this way)
+            if (memberData.business_id) {
                 const { data: bizData } = await supabase
                     .from('businesses')
                     .select('*')

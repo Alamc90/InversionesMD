@@ -502,14 +502,20 @@ async saveBusinessConfig(config: any, businessId?: string) {
           .from('business-logos')
           .getPublicUrl(fileName);
 
-      const logoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      // Add timestamp and random string to force cache busting
+      const logoUrl = `${urlData.publicUrl}?t=${Date.now()}&r=${Math.random().toString(36).substring(7)}`;
 
       // Save URL to business record
       if (newSchema && businessId) {
-          await supabase
+          const { error: updateError } = await supabase
               .from('businesses')
               .update({ logo_url: logoUrl, updated_at: new Date().toISOString() })
               .eq('id', businessId);
+          
+          if (updateError) {
+             console.error("Error updating business logo_url:", updateError);
+             throw updateError;
+          }
       }
 
       return logoUrl;
