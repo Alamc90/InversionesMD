@@ -11,14 +11,6 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
         storageKey: 'vehicle-installment-auth',
         flowType: 'pkce',
     },
-    global: {
-        fetch: (url, options = {}) => {
-            return fetch(url, {
-                ...options,
-                keepalive: true,
-            });
-        },
-    },
     db: {
         schema: 'public',
     },

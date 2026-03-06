@@ -267,95 +267,99 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setConnectionFailed(didTimeout);
     };
 
-    // Single init — guarded by initDone ref to prevent double-runs in StrictMode
     useEffect(() => {
-        if (initDone.current) return;
-        initDone.current = true;
-
+        let isMounted = true;
         // Safety net: always stop loading after max timeout
         const safetyTimeout = setTimeout(() => {
-            setLoading((current) => {
-                if (current) {
-                    console.warn('[AuthContext] Safety timeout: forcing loading=false after 30s');
-                }
-                return false;
-            });
+            if (isMounted) {
+                setLoading((current) => {
+                    if (current) {
+                        console.warn('[AuthContext] Safety timeout: forcing loading=false after 30s');
+                    }
+                    return false;
+                });
+            }
         }, 30000);
 
-        const init = async () => {
-            try {
-                const { data: { session: s } } = await supabase.auth.getSession();
-                setSession(s);
-                setUser(s?.user ?? null);
-
-                if (s?.user) {
-                    const { value: result, timedOut } = await withTimeout(
-                        fetchMembership(s.user.id),
-                        20000,
-                        { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }
-                    );
-                    applyMembership(result, timedOut);
-
-                    // If timed out, schedule a silent auto-retry in background
-                    if (timedOut && s.user) {
-                        const userId = s.user.id;
-                        setTimeout(async () => {
-                            console.log('[AuthContext] Auto-retrying membership fetch after timeout...');
-                            try {
-                                const retryResult = await fetchMembership(userId);
-                                applyMembership(retryResult, false);
-                            } catch (e) {
-                                console.error('[AuthContext] Auto-retry failed:', e);
-                            }
-                        }, 3000);
-                    }
-                }
-            } catch (error) {
-                console.error('[AuthContext] init error:', error);
-            } finally {
-                clearTimeout(safetyTimeout);
-                setLoading(false);
-            }
-        };
-
-        init();
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+        const checkAuth = async (s: Session | null) => {
+            if (!isMounted) return;
             setSession(s);
             setUser(s?.user ?? null);
 
             if (s?.user) {
-                // If we already have membership data cached, skip re-fetch on TOKEN_REFRESHED
-                if (_event === 'TOKEN_REFRESHED' && membershipCache.current?.business) {
-                    return;
-                }
-                // On SIGNED_IN, show loading while membership is fetched
-                // This prevents MainLayout from showing "no business" error prematurely
-                if (_event === 'SIGNED_IN') {
-                    setLoading(true);
-                }
+                // Show loading state for any event that requires a new fetch
+                setLoading(true);
+                
                 // Use timeout to prevent hanging on auth state changes
                 const { value: result, timedOut } = await withTimeout(
                     fetchMembership(s.user.id),
                     15000,
                     membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }
                 );
-                if (!timedOut) {
+                
+                if (isMounted && !timedOut) {
                     applyMembership(result);
+                } else if (isMounted && timedOut) {
+                    // Try to apply whatever we have, or at least show connection failed
+                    applyMembership(membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }, true);
+                    
+                    // If timed out, schedule a silent auto-retry in background
+                    const userId = s.user.id;
+                    setTimeout(async () => {
+                        if (!isMounted) return;
+                        console.log('[AuthContext] Auto-retrying membership fetch after timeout...');
+                        try {
+                            const retryResult = await fetchMembership(userId);
+                            if (isMounted) applyMembership(retryResult, false);
+                        } catch (e) {
+                            console.error('[AuthContext] Auto-retry failed:', e);
+                        }
+                    }, 3000);
                 }
-                if (_event === 'SIGNED_IN') {
-                    setLoading(false);
-                }
+                
+                if (isMounted) setLoading(false);
             } else {
                 membershipCache.current = null;
-                setBusiness(null);
-                setMembership(null);
-                setPermissions(defaultPermissions);
-                setIsAdmin(false);
+                if (isMounted) {
+                    setBusiness(null);
+                    setMembership(null);
+                    setPermissions(defaultPermissions);
+                    setIsAdmin(false);
+                    setLoading(false);
+                }
             }
+            if (isMounted) clearTimeout(safetyTimeout);
+        };
+
+        const initSession = async () => {
+            try {
+                const { data: { session: s } } = await supabase.auth.getSession();
+                await checkAuth(s);
+            } catch (error) {
+                console.error('[AuthContext] init error:', error);
+                if (isMounted) setLoading(false);
+            }
+        };
+
+        initSession();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+            if (!isMounted) return;
+            // Ignore INITIAL_SESSION event to prevent double-fetching since getSession handles it
+            if (_event === 'INITIAL_SESSION') return;
+            
+            // If we already have membership data cached, skip re-fetch on TOKEN_REFRESHED
+            if (_event === 'TOKEN_REFRESHED' && membershipCache.current?.business) {
+                setSession(s);
+                setUser(s?.user ?? null);
+                return;
+            }
+            
+            await checkAuth(s);
         });
 
         return () => {
+            isMounted = false;
             clearTimeout(safetyTimeout);
             subscription.unsubscribe();
         };
