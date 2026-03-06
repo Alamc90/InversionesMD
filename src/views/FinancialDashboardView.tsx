@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,13 +46,7 @@ export const FinancialDashboardView = () => {
     const [cashDate, setCashDate] = useState(new Date().toISOString().split('T')[0]);
     const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-    useEffect(() => {
-        if (business?.id) {
-            loadSummary();
-        }
-    }, [business?.id, period]);
-
-    const loadSummary = async () => {
+    const loadSummary = useCallback(async () => {
         if (!business?.id) return;
         setLoading(true);
         try {
@@ -64,7 +58,13 @@ export const FinancialDashboardView = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [business?.id, period]);
+
+    useEffect(() => {
+        if (business?.id) {
+            loadSummary();
+        }
+    }, [loadSummary, business?.id]);
 
     const handleAddExpense = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -418,7 +418,7 @@ export const FinancialDashboardView = () => {
                 description="¿Está seguro de eliminar esta transacción? Esta acción no se puede deshacer."
                 confirmLabel="Eliminar"
                 variant="danger"
-                onConfirm={() => deleteTarget && handleDeleteTransaction(deleteTarget)}
+                onConfirm={() => { if (deleteTarget) return handleDeleteTransaction(deleteTarget); }}
             />
         </div>
     );

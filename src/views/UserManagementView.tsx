@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
@@ -37,13 +37,7 @@ export const UserManagementView = () => {
     const [deleteInvitationId, setDeleteInvitationId] = useState<string | null>(null);
     const [removeMemberTarget, setRemoveMemberTarget] = useState<BusinessMember | null>(null);
 
-    useEffect(() => {
-        if (business?.id) {
-            loadData();
-        }
-    }, [business?.id]);
-
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         if (!business?.id) {
             console.warn('[UserManagement] No business.id available');
             setLoading(false);
@@ -65,7 +59,13 @@ export const UserManagementView = () => {
             // Non-fatal — invitations may fail due to RLS
         }
         setLoading(false);
-    };
+    }, [business?.id]);
+
+    useEffect(() => {
+        if (business?.id) {
+            loadData();
+        }
+    }, [loadData, business?.id]);
 
     const handleInvite = async (e: React.FormEvent) => {
         e.preventDefault();

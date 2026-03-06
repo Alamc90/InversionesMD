@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
@@ -26,7 +26,7 @@ export const RecordsView = () => {
     const [deleteVehicleTarget, setDeleteVehicleTarget] = useState<any | null>(null);
     const [deletingVehicle, setDeletingVehicle] = useState(false);
 
-    const loadData = async () => {
+    const loadData = useCallback(async () => {
         setLoading(true);
         try {
             if (activeTab === 'clientes') {
@@ -42,11 +42,11 @@ export const RecordsView = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, [activeTab]);
 
     useEffect(() => {
         loadData();
-    }, [activeTab]);
+    }, [loadData]);
 
     const handleSaveCustomer = async (e: React.FormEvent) => {
         e.preventDefault();
