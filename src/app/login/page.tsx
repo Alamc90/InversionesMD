@@ -9,22 +9,18 @@ import { LoadingScreen } from '@/components/LoadingScreen';
 export default function LoginPage() {
     const router = useRouter();
     const { session, loading } = useAuth();
-    // Show login form immediately — no artificial delay.
-    // If auth resolves fast, the redirect effect handles it.
     const [forceShow, setForceShow] = useState(false);
     const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // If already logged in, redirect to dashboard always
+    // If already logged in (e.g., navigated here manually), redirect
     useEffect(() => {
         if (!loading && session) {
             router.replace('/dashboard');
         }
     }, [loading, session, router]);
 
-    // Safety: if loading takes more than 1.5s, force-show the login form
+    // Safety: if loading takes more than 800ms, force-show the login form
     useEffect(() => {
-        // We only wait a short while before assuming they should see the login form
-        // especially if they navigated here manually
         timerRef.current = setTimeout(() => setForceShow(true), 800);
         return () => {
             if (timerRef.current) clearTimeout(timerRef.current);
@@ -41,13 +37,14 @@ export default function LoginPage() {
         return <LoadingScreen message="Cargando..." />;
     }
 
-    // Show login form (either loading finished with no session, or safety timeout hit)
+    // After login/signup, use full-page navigation to ensure
+    // the new session is picked up cleanly by AuthContext on reload
     return <LoginView 
         onLoginSuccess={() => {
-            router.push('/dashboard');
+            window.location.href = '/dashboard';
         }}
         onSignUpSuccess={() => {
-            router.push('/setup-negocio');
+            window.location.href = '/setup-negocio';
         }}
     />;
 }

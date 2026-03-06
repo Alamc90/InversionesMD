@@ -35,6 +35,8 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const [showDetails, setShowDetails] = useState(false);
     const [businessConfig, setBusinessConfig] = useState<BusinessConfig | null>(null);
     const [showCustomAmount, setShowCustomAmount] = useState(false);
+    const [loadingData, setLoadingData] = useState(false);
+    const [processing, setProcessing] = useState(false);
 
     useEffect(() => {
         if (isOpen && vehicleId) {
@@ -43,33 +45,35 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     }, [isOpen, vehicleId]);
 
     const loadData = async () => {
+        setLoadingData(true);
         try {
-            const config = await DataService.getBusinessConfig();
+            // Parallel fetch: config + vehicle details at the same time
+            const [config, data] = await Promise.all([
+                DataService.getBusinessConfig(),
+                DataService.getVehicleDetails(vehicleId)
+            ]);
             setBusinessConfig(config);
-            
-            const data = await DataService.getVehicleDetails(vehicleId);
             
             let plans = Array.isArray(data?.installment_plans) 
                 ? data.installment_plans 
                 : (data?.installment_plans ? [data.installment_plans] : []);
                 
             if (plans.length > 0) {
-                // Force fetch history to calculate progress client-side
-                // This avoids the 'stale read' from the database trigger
                 let plan = plans[0];
                 
-                // Fetch fresh plan details first
-                try {
-                    const freshPlan = await DataService.getInstallmentPlan(plan.id);
-                    if (freshPlan) {
-                         plan = { ...plan, ...freshPlan };
-                    }
-                } catch (e) {
-                    console.error("Failed to refresh plan details", e);
+                // Parallel fetch: fresh plan + payment history at the same time
+                const [freshPlan, records] = await Promise.all([
+                    DataService.getInstallmentPlan(plan.id).catch(e => {
+                        console.error("Failed to refresh plan details", e);
+                        return null;
+                    }),
+                    DataService.getPaymentHistory(plan.id)
+                ]);
+
+                if (freshPlan) {
+                    plan = { ...plan, ...freshPlan };
                 }
 
-                // Get absolute truth from payment history
-                const records = await DataService.getPaymentHistory(plan.id);
                 setHistory(records || []);
 
                 // Calculate progress manually from APROBADO payments only
@@ -97,6 +101,8 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
             }
         } catch (error) {
             console.error("Error loading payment data:", error);
+        } finally {
+            setLoadingData(false);
         }
     };
 
@@ -145,12 +151,15 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     };
 
     const confirmPayment = async () => {
+        if (processing) return; // Guard against double-click
+        
         const plans = Array.isArray(details?.installment_plans) 
             ? details.installment_plans 
             : (details?.installment_plans ? [details.installment_plans] : []);
             
         if (plans.length === 0) return;
         
+        setProcessing(true);
         try {
             const result = await DataService.registerPayment(plans[0].id, paymentAmount, paymentNote, canAutoApprove);
             
@@ -208,10 +217,25 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
         } catch (error) {
             toast.error('Error al registrar pago');
             console.error(error);
+        } finally {
+            setProcessing(false);
         }
     };
 
-    if (!isOpen || !details) return null;
+    if (!isOpen) return null;
+
+    if (loadingData || !details) {
+        return (
+            <Dialog open={isOpen} onOpenChange={() => onClose()}>
+                <DialogContent className="sm:max-w-md" onOpenAutoFocus={(e) => e.preventDefault()}>
+                    <div className="flex flex-col items-center justify-center py-12 gap-3">
+                        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                        <p className="text-sm text-muted-foreground">Cargando datos de pago...</p>
+                    </div>
+                </DialogContent>
+            </Dialog>
+        );
+    }
 
     const plans = Array.isArray(details.installment_plans) 
         ? details.installment_plans 
@@ -567,8 +591,10 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                 />
                             </div>
                             <div className="flex justify-end gap-2 pt-4">
-                                <Button variant="outline" onClick={() => setIsConfirmOpen(false)}>Cancelar</Button>
-                                <Button onClick={confirmPayment}>Aceptar Pago</Button>
+                                <Button variant="outline" onClick={() => setIsConfirmOpen(false)} disabled={processing}>Cancelar</Button>
+                                <Button onClick={confirmPayment} disabled={processing}>
+                                    {processing ? 'Procesando...' : 'Aceptar Pago'}
+                                </Button>
                             </div>
                         </div>
                     </DialogContent>

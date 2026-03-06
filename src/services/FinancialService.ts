@@ -32,30 +32,41 @@ export const FinancialService = {
      * Get financial summary for a business filtered by period
      */
     async getFinancialSummary(businessId: string, period: ReportPeriod, customDate?: Date): Promise<FinancialSummary> {
-        const { startDate, endDate } = this.getDateRange(period, customDate);
-
-        const { data, error } = await supabase
+        let query = supabase
             .from('financial_transactions')
             .select('*')
             .eq('business_id', businessId)
-            .gte('transaction_date', startDate.toISOString())
-            .lte('transaction_date', endDate.toISOString())
             .order('transaction_date', { ascending: false });
+
+        // Only apply date filter if not 'todo'
+        if (period !== 'todo') {
+            const { startDate, endDate } = this.getDateRange(period, customDate);
+            query = query
+                .gte('transaction_date', startDate.toISOString())
+                .lte('transaction_date', endDate.toISOString());
+        }
+
+        const { data, error } = await query;
 
         if (error) throw error;
 
         const transactions = data || [];
         const totalIncome = transactions
-            .filter(t => t.type === 'INGRESO')
+            .filter(t => t.type === 'INGRESO' && t.category !== 'AJUSTE_CAJA')
             .reduce((sum, t) => sum + Number(t.amount), 0);
         const totalExpenses = transactions
             .filter(t => t.type === 'EGRESO')
+            .reduce((sum, t) => sum + Number(t.amount), 0);
+        const adjustments = transactions
+            .filter(t => t.category === 'AJUSTE_CAJA')
             .reduce((sum, t) => sum + Number(t.amount), 0);
 
         return {
             totalIncome,
             totalExpenses,
+            adjustments,
             profit: totalIncome - totalExpenses,
+            balance: totalIncome + adjustments - totalExpenses,
             transactions,
         };
     },

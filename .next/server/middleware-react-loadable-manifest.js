@@ -1,1 +1,1 @@
-self.__REACT_LOADABLE_MANIFEST="{}";
+self.__REACT_LOADABLE_MANIFEST="{\"app\\\\configuracion\\\\page.tsx -> @/components/PrinterSetup\":{\"id\":\"app\\\\configuracion\\\\page.tsx -> @/components/PrinterSetup\",\"files\":[]},\"app\\\\configuracion\\\\page.tsx -> @/views/UserManagementView\":{\"id\":\"app\\\\configuracion\\\\page.tsx -> @/views/UserManagementView\",\"files\":[\"static/chunks/_app-pages-browser_src_views_UserManagementView_tsx.js\"]}}"

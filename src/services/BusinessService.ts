@@ -184,4 +184,30 @@ export const BusinessService = {
             membership: data,
         };
     },
+
+    /**
+     * Reset all operational data for a business (customers, vehicles, plans, payments, transactions, templates).
+     * Preserves business config, members, and invitations.
+     */
+    async resetBusinessData(businessId: string) {
+        // Delete in dependency order: payment_records → installment_plans → vehicles → customers, financial_transactions, payment_plan_templates
+        const tables = [
+            'payment_records',
+            'installment_plans', 
+            'vehicles',
+            'customers',
+            'financial_transactions',
+            'payment_plan_templates',
+        ];
+
+        for (const table of tables) {
+            const { error } = await supabase
+                .from(table)
+                .delete()
+                .eq('business_id', businessId);
+            if (error) {
+                throw new Error(`Error al limpiar ${table}: ${error.message}`);
+            }
+        }
+    },
 };

@@ -12,12 +12,14 @@ import { formatCurrency } from '@/lib/utils';
 import { PAYMENT_STATUS_LABELS, PAYMENT_STATUS_COLORS } from '@/models/Payment';
 import { toast } from 'sonner';
 import { CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export const PaymentApprovalsView = () => {
     const { business, hasPermission } = useAuth();
     const [pendingPayments, setPendingPayments] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
     const [processingId, setProcessingId] = useState<number | null>(null);
+    const [denyTarget, setDenyTarget] = useState<number | null>(null);
 
     useEffect(() => {
         loadPendingPayments();
@@ -65,8 +67,6 @@ export const PaymentApprovalsView = () => {
     };
 
     const handleDeny = async (paymentId: number) => {
-        if (!confirm('¿Está seguro de denegar este pago? Esta acción no se puede deshacer.')) return;
-        
         setProcessingId(paymentId);
         try {
             await DataService.denyPayment(paymentId);
@@ -77,6 +77,7 @@ export const PaymentApprovalsView = () => {
             console.error(error);
         } finally {
             setProcessingId(null);
+            setDenyTarget(null);
         }
     };
 
@@ -184,7 +185,7 @@ export const PaymentApprovalsView = () => {
                                             </Button>
                                             <Button 
                                                 variant="destructive"
-                                                onClick={() => handleDeny(payment.id)}
+                                                onClick={() => setDenyTarget(payment.id)}
                                                 disabled={isProcessing}
                                             >
                                                 <XCircle className="h-4 w-4 mr-2" />
@@ -198,6 +199,17 @@ export const PaymentApprovalsView = () => {
                     })}
                 </div>
             )}
+
+            <ConfirmDialog
+                open={denyTarget !== null}
+                onOpenChange={(open) => !open && setDenyTarget(null)}
+                title="Denegar Pago"
+                description="¿Está seguro de denegar este pago? Esta acción no se puede deshacer."
+                confirmLabel="Denegar Pago"
+                variant="warning"
+                onConfirm={() => denyTarget !== null && handleDeny(denyTarget)}
+                loading={processingId !== null}
+            />
         </div>
     );
 };

@@ -622,5 +622,31 @@ async getPaymentPlanTemplates(businessId?: string): Promise<PaymentPlanTemplate[
           .delete()
           .eq('id', id);
       if (error) throw error;
+  },
+
+  async deleteVehicle(id: number) {
+      // Delete related payment records first
+      const { data: plans } = await supabase
+          .from('installment_plans')
+          .select('id')
+          .eq('vehicle_id', id);
+
+      if (plans && plans.length > 0) {
+          const planIds = plans.map(p => p.id);
+          await supabase
+              .from('payment_records')
+              .delete()
+              .in('plan_id', planIds);
+          await supabase
+              .from('installment_plans')
+              .delete()
+              .in('id', planIds);
+      }
+
+      const { error } = await supabase
+          .from('vehicles')
+          .delete()
+          .eq('id', id);
+      if (error) throw error;
   }
 };

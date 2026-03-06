@@ -16,6 +16,8 @@ export type TransactionCategory =
     | 'CUOTA_INICIAL' 
     | 'COMPRA_VEHICULO' 
     | 'GASTOS_OPERATIVOS' 
+    | 'AJUSTE_CAJA'
+    | 'RETIRO'
     | 'OTRO';
 
 export const CATEGORY_LABELS: Record<TransactionCategory, string> = {
@@ -23,12 +25,15 @@ export const CATEGORY_LABELS: Record<TransactionCategory, string> = {
     CUOTA_INICIAL: 'Cuota Inicial',
     COMPRA_VEHICULO: 'Compra de Vehículo',
     GASTOS_OPERATIVOS: 'Gastos Operativos',
+    AJUSTE_CAJA: 'Ajuste de Caja',
+    RETIRO: 'Retiro',
     OTRO: 'Otro',
 };
 
 export const EXPENSE_CATEGORIES: TransactionCategory[] = [
     'COMPRA_VEHICULO',
     'GASTOS_OPERATIVOS',
+    'RETIRO',
     'OTRO',
 ];
 
@@ -38,11 +43,13 @@ export const INCOME_CATEGORIES: TransactionCategory[] = [
     'OTRO',
 ];
 
-export type ReportPeriod = 'diario' | 'semanal' | 'mensual';
+export type ReportPeriod = 'diario' | 'semanal' | 'mensual' | 'todo';
 
 export interface FinancialSummary {
     totalIncome: number;
     totalExpenses: number;
+    adjustments: number;
     profit: number;
+    balance: number;
     transactions: FinancialTransaction[];
 }

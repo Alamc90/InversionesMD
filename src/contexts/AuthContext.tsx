@@ -329,6 +329,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (_event === 'TOKEN_REFRESHED' && membershipCache.current?.business) {
                     return;
                 }
+                // On SIGNED_IN, show loading while membership is fetched
+                // This prevents MainLayout from showing "no business" error prematurely
+                if (_event === 'SIGNED_IN') {
+                    setLoading(true);
+                }
                 // Use timeout to prevent hanging on auth state changes
                 const { value: result, timedOut } = await withTimeout(
                     fetchMembership(s.user.id),
@@ -337,6 +342,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 );
                 if (!timedOut) {
                     applyMembership(result);
+                }
+                if (_event === 'SIGNED_IN') {
+                    setLoading(false);
                 }
             } else {
                 membershipCache.current = null;

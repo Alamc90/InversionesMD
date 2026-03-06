@@ -14,6 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { BusinessMember, BusinessInvitation, UserPermissions, PERMISSION_LABELS, DEFAULT_EMPLOYEE_PERMISSIONS, DEFAULT_ADMIN_PERMISSIONS } from '@/models/Business';
 import { toast } from 'sonner';
 import { UserPlus, Shield, Trash2, Mail, Users } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export const UserManagementView = () => {
     const { business, isAdmin, user } = useAuth();
@@ -31,6 +32,10 @@ export const UserManagementView = () => {
     const [editingMember, setEditingMember] = useState<BusinessMember | null>(null);
     const [editPermissions, setEditPermissions] = useState<UserPermissions>(DEFAULT_EMPLOYEE_PERMISSIONS);
     const [editRole, setEditRole] = useState<'admin' | 'employee'>('employee');
+
+    // Confirm dialogs
+    const [deleteInvitationId, setDeleteInvitationId] = useState<string | null>(null);
+    const [removeMemberTarget, setRemoveMemberTarget] = useState<BusinessMember | null>(null);
 
     useEffect(() => {
         if (business?.id) {
@@ -104,10 +109,10 @@ export const UserManagementView = () => {
     };
 
     const handleDeleteInvitation = async (id: string) => {
-        if (!confirm('¿Eliminar esta invitación?')) return;
         try {
             await BusinessService.deleteInvitation(id);
             toast.success('Invitación eliminada');
+            setDeleteInvitationId(null);
             loadData();
         } catch (error) {
             toast.error('Error al eliminar invitación');
@@ -115,14 +120,10 @@ export const UserManagementView = () => {
     };
 
     const handleRemoveMember = async (member: BusinessMember) => {
-        if (member.user_id === user?.id) {
-            toast.error('No puedes eliminarte a ti mismo');
-            return;
-        }
-        if (!confirm(`¿Eliminar a ${member.display_name || 'este usuario'} del negocio?`)) return;
         try {
             await BusinessService.removeMember(member.id!);
             toast.success('Miembro eliminado');
+            setRemoveMemberTarget(null);
             loadData();
         } catch (error) {
             toast.error('Error al eliminar miembro');
@@ -261,7 +262,13 @@ export const UserManagementView = () => {
                                                     <Button 
                                                         variant="destructive" 
                                                         size="sm" 
-                                                        onClick={() => handleRemoveMember(member)}
+                                                        onClick={() => {
+                                                            if (member.user_id === user?.id) {
+                                                                toast.error('No puedes eliminarte a ti mismo');
+                                                                return;
+                                                            }
+                                                            setRemoveMemberTarget(member);
+                                                        }}
                                                     >
                                                         <Trash2 className="h-3 w-3" />
                                                     </Button>
@@ -315,7 +322,7 @@ export const UserManagementView = () => {
                                         </TableCell>
                                         <TableCell>{new Date(inv.created_at!).toLocaleDateString()}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="destructive" size="sm" onClick={() => handleDeleteInvitation(inv.id!)}>
+                                            <Button variant="destructive" size="sm" onClick={() => setDeleteInvitationId(inv.id!)}>
                                                 <Trash2 className="h-3 w-3" />
                                             </Button>
                                         </TableCell>
@@ -439,6 +446,26 @@ export const UserManagementView = () => {
                     </div>
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={deleteInvitationId !== null}
+                onOpenChange={(open) => !open && setDeleteInvitationId(null)}
+                title="Eliminar Invitación"
+                description="¿Está seguro de eliminar esta invitación pendiente?"
+                confirmLabel="Eliminar"
+                variant="warning"
+                onConfirm={() => deleteInvitationId && handleDeleteInvitation(deleteInvitationId)}
+            />
+
+            <ConfirmDialog
+                open={removeMemberTarget !== null}
+                onOpenChange={(open) => !open && setRemoveMemberTarget(null)}
+                title="Eliminar Miembro"
+                description={`¿Está seguro de eliminar a ${removeMemberTarget?.display_name || 'este usuario'} del negocio? Perderá acceso inmediatamente.`}
+                confirmLabel="Eliminar Miembro"
+                variant="danger"
+                onConfirm={() => removeMemberTarget && handleRemoveMember(removeMemberTarget)}
+            />
         </div>
     );
 };

@@ -12,6 +12,8 @@ import { Customer } from '@/models/Customer';
 import { Vehicle } from '@/models/Vehicle';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export const RecordsView = () => {
     const [activeTab, setActiveTab] = useState<'clientes' | 'vehiculos'>('clientes');
@@ -21,6 +23,8 @@ export const RecordsView = () => {
 
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
     const [editingVehicle, setEditingVehicle] = useState<any | null>(null);
+    const [deleteVehicleTarget, setDeleteVehicleTarget] = useState<any | null>(null);
+    const [deletingVehicle, setDeletingVehicle] = useState(false);
 
     const loadData = async () => {
         setLoading(true);
@@ -72,6 +76,20 @@ export const RecordsView = () => {
             loadData();
         } catch (error) {
             toast.error('Error al actualizar');
+        }
+    };
+
+    const handleDeleteVehicle = async (vehicle: any) => {
+        setDeletingVehicle(true);
+        try {
+            await DataService.deleteVehicle(vehicle.id);
+            toast.success('Vehículo eliminado');
+            setDeleteVehicleTarget(null);
+            loadData();
+        } catch (error) {
+            toast.error('Error al eliminar vehículo');
+        } finally {
+            setDeletingVehicle(false);
         }
     };
 
@@ -157,7 +175,12 @@ export const RecordsView = () => {
                                             <TableCell>{v.color}</TableCell>
                                             <TableCell>{v.customers?.first_name} {v.customers?.last_name}</TableCell>
                                             <TableCell>
-                                                <Button variant="outline" size="sm" onClick={() => setEditingVehicle(v)}>Editar</Button>
+                                                <div className="flex gap-2">
+                                                    <Button variant="outline" size="sm" onClick={() => setEditingVehicle(v)}>Editar</Button>
+                                                    <Button variant="destructive" size="sm" onClick={() => setDeleteVehicleTarget(v)}>
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -235,6 +258,17 @@ export const RecordsView = () => {
                     )}
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={deleteVehicleTarget !== null}
+                onOpenChange={(open) => !open && setDeleteVehicleTarget(null)}
+                title="Eliminar Vehículo"
+                description={`¿Está seguro de eliminar el vehículo ${deleteVehicleTarget?.model || ''} (${deleteVehicleTarget?.plate || ''})? Se eliminarán también los planes de pago e historial de pagos asociados. Esta acción no se puede deshacer.`}
+                confirmLabel="Eliminar Vehículo"
+                variant="danger"
+                onConfirm={() => { if (deleteVehicleTarget) handleDeleteVehicle(deleteVehicleTarget); }}
+                loading={deletingVehicle}
+            />
 
         </div>
     );

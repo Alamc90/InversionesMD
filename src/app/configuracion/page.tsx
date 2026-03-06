@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, lazy, Suspense } from 'react';
 import { MainLayout } from '@/components/MainLayout';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -11,14 +11,24 @@ import { DataService } from '@/services/DataService';
 import { BusinessConfig } from '@/models/BusinessConfig';
 import { PaymentPlanTemplate } from '@/models/PaymentPlanTemplate';
 import { useRouter } from 'next/navigation';
-import { Trash2, Upload, ImageIcon } from 'lucide-react';
+import { Trash2, Upload, ImageIcon, AlertTriangle } from 'lucide-react';
 import { toast } from "sonner";
 import { parseCurrency, formatCurrency } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/AuthContext';
-import { UserManagementView } from '@/views/UserManagementView';
-import { PrinterSetup } from '@/components/PrinterSetup';
-import Image from 'next/image';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
+import { BusinessService } from '@/services/BusinessService';
+import dynamic from 'next/dynamic';
+
+// Lazy-load heavy tab components - only loaded when their tab is active
+const UserManagementView = dynamic(() => import('@/views/UserManagementView').then(mod => ({ default: mod.UserManagementView })), {
+    loading: () => <LoadingScreen message="Cargando usuarios..." inline />,
+    ssr: false
+});
+const PrinterSetup = dynamic(() => import('@/components/PrinterSetup').then(mod => ({ default: mod.PrinterSetup })), {
+    loading: () => <LoadingScreen message="Cargando impresora..." inline />,
+    ssr: false
+});
 
 export default function ConfigurationPage() {
     const router = useRouter();
@@ -29,7 +39,13 @@ export default function ConfigurationPage() {
     const [uploadingLogo, setUploadingLogo] = useState(false);
     const [logoUrl, setLogoUrl] = useState<string | null>(null);
     const [logoPreview, setLogoPreview] = useState<string | null>(null);        
-    const [activeTab, setActiveTab] = useState<'business' | 'plans' | 'printer' | 'users'>('business');
+    const [activeTab, setActiveTab] = useState<'business' | 'plans' | 'printer' | 'users' | 'danger'>('business');
+
+    // Confirm delete template
+    const [deleteTemplateId, setDeleteTemplateId] = useState<string | null>(null);
+    // Reset business
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [resetting, setResetting] = useState(false);
 
     // Config state
     const [config, setConfig] = useState<BusinessConfig>({
@@ -54,7 +70,10 @@ export default function ConfigurationPage() {
             if (!business?.id) return; // Wait for business context
             
             try {
-                const data = await DataService.getBusinessConfig(business.id);
+                const [data, tp] = await Promise.all([
+                    DataService.getBusinessConfig(business.id),
+                    DataService.getPaymentPlanTemplates(business.id)
+                ]);
                 if (data) {
                     setConfig({
                         business_name: data.business_name || '',
@@ -66,7 +85,6 @@ export default function ConfigurationPage() {
                         setLogoUrl(data.logo_url);
                     }
                 }
-                const tp = await DataService.getPaymentPlanTemplates(business.id);
                 setTemplates(tp);
             } catch (error) {
                 console.error("Error loading config", error);
@@ -121,13 +139,29 @@ export default function ConfigurationPage() {
     };
 
     const handleDeleteTemplate = async (id: string) => {
-        if (!confirm("¿Seguro de eliminar este plan?")) return;
         try {
             await DataService.deletePaymentPlanTemplate(id);
             setTemplates(templates.filter(t => t.id !== id));
+            setDeleteTemplateId(null);
             toast.success("Plan eliminado.");
         } catch (error) {
             toast.error("Error al eliminar.");
+        }
+    };
+
+    const handleResetBusiness = async () => {
+        if (!business?.id) return;
+        setResetting(true);
+        try {
+            await BusinessService.resetBusinessData(business.id);
+            toast.success('Todos los datos han sido eliminados. Recargando...');
+            setShowResetConfirm(false);
+            setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
+        } catch (error) {
+            console.error(error);
+            toast.error('Error al resetear los datos.');
+        } finally {
+            setResetting(false);
         }
     };
 
@@ -176,6 +210,16 @@ export default function ConfigurationPage() {
                                         onClick={() => setActiveTab('users')}
                                     >
                                         Usuarios
+                                    </button>
+                                </li>
+                            )}
+                            {showUsers && (
+                                <li className="flex-1 md:flex-none">
+                                    <button 
+                                        className={`w-full text-left px-4 py-3 hover:bg-muted whitespace-nowrap text-red-600 ${activeTab === 'danger' ? 'bg-red-50 md:border-l-4 md:border-l-red-500 border-b-2 border-b-red-500 md:border-b-0' : ''}`}
+                                        onClick={() => setActiveTab('danger')}
+                                    >
+                                        Zona Peligrosa
                                     </button>
                                 </li>
                             )}
@@ -377,7 +421,7 @@ export default function ConfigurationPage() {
                                         <Button 
                                             variant="ghost" size="icon" 
                                             className="absolute top-2 right-2 text-destructive hover:bg-destructive/10"
-                                            onClick={() => handleDeleteTemplate(t.id!)}
+                                            onClick={() => setDeleteTemplateId(t.id!)}
                                         >
                                             <Trash2 className="h-4 w-4" />
                                         </Button>
@@ -402,8 +446,64 @@ export default function ConfigurationPage() {
                             </div>
                         </div>
                     )}
+
+                    {activeTab === 'danger' && showUsers && (
+                        <Card className="border-red-200">
+                            <CardHeader>
+                                <CardTitle className="text-red-600 flex items-center gap-2">
+                                    <AlertTriangle className="h-5 w-5" />
+                                    Zona Peligrosa
+                                </CardTitle>
+                                <CardDescription>
+                                    Estas acciones son irreversibles. Proceda con extrema precaución.
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="p-4 border border-red-200 rounded-lg bg-red-50/50 space-y-3">
+                                    <div>
+                                        <h4 className="font-semibold text-red-700">Eliminar todos los datos del negocio</h4>
+                                        <p className="text-sm text-muted-foreground mt-1">
+                                            Esto eliminará permanentemente todos los clientes, vehículos, planes de pago, 
+                                            historial de pagos, transacciones financieras y plantillas de planes. 
+                                            Los miembros del equipo y la configuración del negocio se mantendrán.
+                                        </p>
+                                    </div>
+                                    <Button 
+                                        variant="destructive" 
+                                        onClick={() => setShowResetConfirm(true)}
+                                    >
+                                        <Trash2 className="h-4 w-4 mr-2" />
+                                        Borrar Todos los Datos
+                                    </Button>
+                                </div>
+                            </CardContent>
+                        </Card>
+                    )}
                 </main>
             </div>
+
+            <ConfirmDialog
+                open={deleteTemplateId !== null}
+                onOpenChange={(open) => !open && setDeleteTemplateId(null)}
+                title="Eliminar Plan"
+                description="¿Está seguro de eliminar este plan predefinido? Esta acción no se puede deshacer."
+                confirmLabel="Eliminar Plan"
+                variant="danger"
+                onConfirm={() => { if (deleteTemplateId) handleDeleteTemplate(deleteTemplateId); }}
+            />
+
+            <ConfirmDialog
+                open={showResetConfirm}
+                onOpenChange={setShowResetConfirm}
+                title="⚠️ Borrar TODOS los datos"
+                description={`Esta acción eliminará PERMANENTEMENTE todos los clientes, vehículos, planes de pago, historial de pagos y transacciones financieras de "${config.business_name || 'este negocio'}". Esta operación NO se puede revertir.`}
+                confirmLabel="Borrar Todo Permanentemente"
+                variant="danger"
+                confirmText="BORRAR TODO"
+                confirmHint='Escribe "BORRAR TODO" en mayúsculas para confirmar:'
+                onConfirm={handleResetBusiness}
+                loading={resetting}
+            />
         </MainLayout>
     );
 }

@@ -15,8 +15,9 @@ import { formatCurrency, parseCurrency } from '@/lib/utils';
 import { toast } from 'sonner';
 import { 
     TrendingUp, TrendingDown, DollarSign, Plus, Trash2,
-    ArrowUpCircle, ArrowDownCircle, Calendar
+    ArrowUpCircle, ArrowDownCircle, Calendar, Wallet, PiggyBank
 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export const FinancialDashboardView = () => {
     const { business } = useAuth();
@@ -24,17 +25,26 @@ export const FinancialDashboardView = () => {
     const [summary, setSummary] = useState<FinancialSummary>({
         totalIncome: 0,
         totalExpenses: 0,
+        adjustments: 0,
         profit: 0,
+        balance: 0,
         transactions: [],
     });
     const [loading, setLoading] = useState(true);
     const [showAddExpense, setShowAddExpense] = useState(false);
+    const [showAddCash, setShowAddCash] = useState(false);
     
-    // New expense form
+    // Expense form
     const [expenseCategory, setExpenseCategory] = useState<TransactionCategory>('COMPRA_VEHICULO');
     const [expenseAmount, setExpenseAmount] = useState(0);
     const [expenseDescription, setExpenseDescription] = useState('');
     const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split('T')[0]);
+
+    // Add cash form
+    const [cashAmount, setCashAmount] = useState(0);
+    const [cashDescription, setCashDescription] = useState('');
+    const [cashDate, setCashDate] = useState(new Date().toISOString().split('T')[0]);
+    const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
     useEffect(() => {
         if (business?.id) {
@@ -80,11 +90,34 @@ export const FinancialDashboardView = () => {
         }
     };
 
+    const handleAddCash = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!business?.id || cashAmount <= 0) return;
+
+        try {
+            await FinancialService.createTransaction({
+                business_id: business.id,
+                type: 'INGRESO',
+                category: 'AJUSTE_CAJA',
+                amount: cashAmount,
+                description: cashDescription || 'Ajuste de caja',
+                transaction_date: new Date(cashDate + 'T12:00:00').toISOString(),
+            });
+            toast.success('Dinero agregado al balance');
+            setShowAddCash(false);
+            setCashAmount(0);
+            setCashDescription('');
+            loadSummary();
+        } catch (error) {
+            toast.error('Error al registrar ajuste');
+        }
+    };
+
     const handleDeleteTransaction = async (id: string) => {
-        if (!confirm('¿Eliminar esta transacción?')) return;
         try {
             await FinancialService.deleteTransaction(id);
             toast.success('Transacción eliminada');
+            setDeleteTarget(null);
             loadSummary();
         } catch (error) {
             toast.error('Error al eliminar');
@@ -96,6 +129,7 @@ export const FinancialDashboardView = () => {
             case 'diario': return 'Hoy';
             case 'semanal': return 'Esta Semana';
             case 'mensual': return 'Este Mes';
+            case 'todo': return 'Todo el Historial';
         }
     };
 
@@ -116,20 +150,21 @@ export const FinancialDashboardView = () => {
                             <SelectItem value="diario">Diario</SelectItem>
                             <SelectItem value="semanal">Semanal</SelectItem>
                             <SelectItem value="mensual">Mensual</SelectItem>
+                            <SelectItem value="todo">Todo</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
             </div>
 
             {/* Summary Cards */}
-            <div className="grid gap-3 md:gap-4 grid-cols-1 sm:grid-cols-3">
+            <div className="grid gap-3 md:gap-4 grid-cols-2 sm:grid-cols-4">
                 <Card className="border-green-200">
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Ingresos</CardTitle>
                         <ArrowUpCircle className="h-5 w-5 text-green-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-green-600">
+                        <div className="text-xl sm:text-2xl font-bold text-green-600">
                             ${loading ? '...' : formatCurrency(summary.totalIncome)}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">{periodLabel(period)}</p>
@@ -142,25 +177,37 @@ export const FinancialDashboardView = () => {
                         <ArrowDownCircle className="h-5 w-5 text-red-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold text-red-600">
+                        <div className="text-xl sm:text-2xl font-bold text-red-600">
                             ${loading ? '...' : formatCurrency(summary.totalExpenses)}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">{periodLabel(period)}</p>
                     </CardContent>
                 </Card>
 
-                <Card className={summary.profit >= 0 ? "border-blue-200" : "border-orange-200"}>
+                {summary.adjustments > 0 && (
+                    <Card className="border-purple-200">
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">Ajustes de Caja</CardTitle>
+                            <PiggyBank className="h-5 w-5 text-purple-500" />
+                        </CardHeader>
+                        <CardContent>
+                            <div className="text-xl sm:text-2xl font-bold text-purple-600">
+                                ${loading ? '...' : formatCurrency(summary.adjustments)}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">Dinero agregado</p>
+                        </CardContent>
+                    </Card>
+                )}
+
+                <Card className={summary.balance >= 0 ? "border-blue-200" : "border-orange-200"}>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Ganancia Neta</CardTitle>
-                        {summary.profit >= 0 
-                            ? <TrendingUp className="h-5 w-5 text-blue-500" />
-                            : <TrendingDown className="h-5 w-5 text-orange-500" />
-                        }
+                        <CardTitle className="text-sm font-medium">Balance</CardTitle>
+                        <Wallet className="h-5 w-5 text-blue-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className={`text-2xl font-bold ${summary.profit >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-                            ${loading ? '...' : formatCurrency(Math.abs(summary.profit))}
-                            {summary.profit < 0 && <span className="text-sm font-normal ml-1">(pérdida)</span>}
+                        <div className={`text-xl sm:text-2xl font-bold ${summary.balance >= 0 ? 'text-blue-600' : 'text-orange-600'}`}>
+                            ${loading ? '...' : formatCurrency(Math.abs(summary.balance))}
+                            {summary.balance < 0 && <span className="text-sm font-normal ml-1">(déficit)</span>}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">{periodLabel(period)}</p>
                     </CardContent>
@@ -168,7 +215,11 @@ export const FinancialDashboardView = () => {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
+                <Button onClick={() => setShowAddCash(true)} variant="default">
+                    <Wallet className="h-4 w-4 mr-2" />
+                    Agregar Dinero
+                </Button>
                 <Button onClick={() => setShowAddExpense(true)} variant="outline">
                     <Plus className="h-4 w-4 mr-2" />
                     Registrar Egreso
@@ -204,15 +255,19 @@ export const FinancialDashboardView = () => {
                                         </TableCell>
                                         <TableCell>
                                             <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full ${
-                                                t.type === 'INGRESO' 
-                                                    ? 'bg-green-50 text-green-700' 
-                                                    : 'bg-red-50 text-red-700'
+                                                t.category === 'AJUSTE_CAJA'
+                                                    ? 'bg-purple-50 text-purple-700'
+                                                    : t.type === 'INGRESO' 
+                                                        ? 'bg-green-50 text-green-700' 
+                                                        : 'bg-red-50 text-red-700'
                                             }`}>
-                                                {t.type === 'INGRESO' 
-                                                    ? <ArrowUpCircle className="h-3 w-3" /> 
-                                                    : <ArrowDownCircle className="h-3 w-3" />
+                                                {t.category === 'AJUSTE_CAJA'
+                                                    ? <PiggyBank className="h-3 w-3" />
+                                                    : t.type === 'INGRESO' 
+                                                        ? <ArrowUpCircle className="h-3 w-3" /> 
+                                                        : <ArrowDownCircle className="h-3 w-3" />
                                                 }
-                                                {t.type === 'INGRESO' ? 'Ingreso' : 'Egreso'}
+                                                {t.category === 'AJUSTE_CAJA' ? 'Ajuste' : t.type === 'INGRESO' ? 'Ingreso' : 'Egreso'}
                                             </span>
                                         </TableCell>
                                         <TableCell className="text-sm">
@@ -222,16 +277,17 @@ export const FinancialDashboardView = () => {
                                             {t.description || '-'}
                                         </TableCell>
                                         <TableCell className={`text-right font-medium ${
+                                            t.category === 'AJUSTE_CAJA' ? 'text-purple-600' :
                                             t.type === 'INGRESO' ? 'text-green-600' : 'text-red-600'
                                         }`}>
-                                            {t.type === 'INGRESO' ? '+' : '-'}${formatCurrency(t.amount)}
+                                            {t.type === 'INGRESO' ? '+' : '-'}{formatCurrency(t.amount)}
                                         </TableCell>
                                         <TableCell>
-                                            {t.type === 'EGRESO' && (
+                                            {(t.type === 'EGRESO' || t.category === 'AJUSTE_CAJA') && (
                                                 <Button 
                                                     variant="ghost" 
                                                     size="icon" 
-                                                    onClick={() => handleDeleteTransaction(t.id!)}
+                                                    onClick={() => setDeleteTarget(t.id!)}
                                                     title="Eliminar"
                                                 >
                                                     <Trash2 className="h-3 w-3 text-destructive" />
@@ -309,6 +365,61 @@ export const FinancialDashboardView = () => {
                     </form>
                 </DialogContent>
             </Dialog>
+
+            {/* Add Cash Dialog */}
+            <Dialog open={showAddCash} onOpenChange={setShowAddCash}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Agregar Dinero a Caja</DialogTitle>
+                    </DialogHeader>
+                    <p className="text-sm text-muted-foreground">
+                        Este monto se sumará al balance sin contar como ingreso por ventas.
+                    </p>
+                    <form onSubmit={handleAddCash} className="space-y-4">
+                        <div className="space-y-2">
+                            <Label>Monto</Label>
+                            <Input 
+                                type="text"
+                                value={cashAmount ? formatCurrency(cashAmount) : ''}
+                                onChange={(e) => setCashAmount(parseCurrency(e.target.value))}
+                                placeholder="$0"
+                                required
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Descripción (opcional)</Label>
+                            <Input 
+                                value={cashDescription}
+                                onChange={(e) => setCashDescription(e.target.value)}
+                                placeholder="Ej. Capital inicial, préstamo, etc."
+                            />
+                        </div>
+                        <div className="space-y-2">
+                            <Label>Fecha</Label>
+                            <Input 
+                                type="date"
+                                value={cashDate}
+                                onChange={(e) => setCashDate(e.target.value)}
+                                required
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <Button type="button" variant="outline" onClick={() => setShowAddCash(false)}>Cancelar</Button>
+                            <Button type="submit">Agregar</Button>
+                        </div>
+                    </form>
+                </DialogContent>
+            </Dialog>
+
+            <ConfirmDialog
+                open={deleteTarget !== null}
+                onOpenChange={(open) => !open && setDeleteTarget(null)}
+                title="Eliminar Transacción"
+                description="¿Está seguro de eliminar esta transacción? Esta acción no se puede deshacer."
+                confirmLabel="Eliminar"
+                variant="danger"
+                onConfirm={() => deleteTarget && handleDeleteTransaction(deleteTarget)}
+            />
         </div>
     );
 };
