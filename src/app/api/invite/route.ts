@@ -48,21 +48,18 @@ export async function POST(request: Request) {
         });
 
         if (error) {
-            // Si ya existe en auth, lo que hace falta es reenviar su acceso directo para "reanudar" el registro
+            // Si ya existe en auth, la forma más contundente de reenviar acceso es mediante un Magic Link (OTP)
             if (error.message.includes('already exists') || error.message.includes('registered')) {
-                 const { error: resendError } = await supabaseAdmin.auth.resend({
-                      type: 'signup', // Se usa 'signup' válido en TS para reenviar el correo de confirmación de cuenta
+                 const { error: otpError } = await supabaseAdmin.auth.signInWithOtp({
                       email: email,
-                      options: { emailRedirectTo: `${origin}/registro` }
+                      options: { 
+                          emailRedirectTo: `${origin}/registro`,
+                          shouldCreateUser: false 
+                      }
                  });
-                 if (resendError) {
-                     // Solo para compatibilidad, intentar recuperación como alternativa
-                     const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
-                         redirectTo: `${origin}/registro`
-                     });
-                     if (resetError) throw resetError;
-                 }
-                 return NextResponse.json({ success: true, message: 'Invitación reenviada correctamente a la cuenta existente.' });
+                 if (otpError) throw otpError;
+                 
+                 return NextResponse.json({ success: true, message: 'Se reenvió un enlace de acceso mágico a la cuenta existente.' });
             }
             throw error;
         }
