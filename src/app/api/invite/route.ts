@@ -29,7 +29,15 @@ export async function POST(request: Request) {
         });
 
         // Determinar dinámicamente el dominio base (localhost o el deploy de Vercel)
-        const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
+        const protocol = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'development' ? 'http' : 'https');
+        const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || 'localhost:3000';
+        
+        // Prioridad:
+        // 1. Variable NEXT_PUBLIC_SITE_URL absoluta (si la definiste manualmente)
+        // 2. Dominio asignado por Vercel dinámicamente
+        // 3. Reconstrucción con los headers (generalmente el req host real o localhost)
+        const origin = process.env.NEXT_PUBLIC_SITE_URL 
+            || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`);
 
         // Generar invitación oficial (esto dispara en automático el correo si configuraste SMTP en Supabase)
         const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
