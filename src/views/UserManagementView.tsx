@@ -454,7 +454,7 @@ export const UserManagementView = () => {
                 description="¿Está seguro de eliminar esta invitación pendiente?"
                 confirmLabel="Eliminar"
                 variant="warning"
-                onConfirm={() => deleteInvitationId && handleDeleteInvitation(deleteInvitationId)}
+                onConfirm={() => { if (deleteInvitationId) return handleDeleteInvitation(deleteInvitationId); }}
             />
 
             <ConfirmDialog
@@ -464,7 +464,7 @@ export const UserManagementView = () => {
                 description={`¿Está seguro de eliminar a ${removeMemberTarget?.display_name || 'este usuario'} del negocio? Perderá acceso inmediatamente.`}
                 confirmLabel="Eliminar Miembro"
                 variant="danger"
-                onConfirm={() => removeMemberTarget && handleRemoveMember(removeMemberTarget)}
+                onConfirm={() => { if (removeMemberTarget) return handleRemoveMember(removeMemberTarget); }}
             />
         </div>
     );
