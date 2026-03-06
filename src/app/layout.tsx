@@ -10,7 +10,9 @@ export const metadata: Metadata = {
   title: "InversionesMD",
   description: "Gestión de cuotas y vehículos",
   icons: {
-    icon: "/icon.svg",
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
   },
 };
 
