@@ -39,7 +39,7 @@ export async function POST(request: Request) {
         const origin = process.env.NEXT_PUBLIC_SITE_URL 
             || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : `${protocol}://${host}`);
 
-        // Generar invitación oficial (esto dispara en automático el correo si configuraste SMTP en Supabase)
+        // Dependiendo de si la cuenta ya se invitó, generar invitacion o reenviar email mágico
         const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
             data: { 
                 invited_by_business: businessName || 'Sistema de Gestión' 
@@ -48,9 +48,21 @@ export async function POST(request: Request) {
         });
 
         if (error) {
-            // Si el error es porque ya existe, está bien, ya podía registrarse
+            // Si ya existe en auth, lo que hace falta es reenviar su acceso directo para "reanudar" el registro
             if (error.message.includes('already exists') || error.message.includes('registered')) {
-                 return NextResponse.json({ success: true, message: 'El usuario ya existía en la base de datos' });
+                 const { error: resendError } = await supabaseAdmin.auth.resend({
+                      type: 'invite',
+                      email: email,
+                      options: { emailRedirectTo: `${origin}/registro` }
+                 });
+                 if (resendError) {
+                     // Solo para compatibilidad en versiones anteriores, intentar recuperacion como alternativa
+                     const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
+                         redirectTo: `${origin}/registro`
+                     });
+                     if (resetError) throw resetError;
+                 }
+                 return NextResponse.json({ success: true, message: 'Invitación reenviada correctamente a la cuenta existente.' });
             }
             throw error;
         }
