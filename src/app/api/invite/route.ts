@@ -51,12 +51,12 @@ export async function POST(request: Request) {
             // Si ya existe en auth, lo que hace falta es reenviar su acceso directo para "reanudar" el registro
             if (error.message.includes('already exists') || error.message.includes('registered')) {
                  const { error: resendError } = await supabaseAdmin.auth.resend({
-                      type: 'invite',
+                      type: 'signup', // Se usa 'signup' válido en TS para reenviar el correo de confirmación de cuenta
                       email: email,
                       options: { emailRedirectTo: `${origin}/registro` }
                  });
                  if (resendError) {
-                     // Solo para compatibilidad en versiones anteriores, intentar recuperacion como alternativa
+                     // Solo para compatibilidad, intentar recuperación como alternativa
                      const { error: resetError } = await supabaseAdmin.auth.resetPasswordForEmail(email, {
                          redirectTo: `${origin}/registro`
                      });
