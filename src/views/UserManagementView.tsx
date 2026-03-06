@@ -13,7 +13,7 @@ import { BusinessService } from '@/services/BusinessService';
 import { useAuth } from '@/contexts/AuthContext';
 import { BusinessMember, BusinessInvitation, UserPermissions, PERMISSION_LABELS, DEFAULT_EMPLOYEE_PERMISSIONS, DEFAULT_ADMIN_PERMISSIONS } from '@/models/Business';
 import { toast } from 'sonner';
-import { UserPlus, Shield, Trash2, Mail, Users } from 'lucide-react';
+import { UserPlus, Shield, Trash2, Mail, Users, RefreshCw } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 export const UserManagementView = () => {
@@ -118,6 +118,35 @@ export const UserManagementView = () => {
             toast.error(error.message || 'Error al crear invitación');
         } finally {
             setIsInviting(false);
+        }
+    };
+
+    const handleResendInvitation = async (email: string) => {
+        if (!business?.id) return;
+        
+        const loadingId = toast.loading(`Enviando nuevo correo a ${email}...`);
+        
+        try {
+            const response = await fetch('/api/invite', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    email: email,
+                    businessName: business.name
+                }),
+            });
+
+            if (!response.ok) {
+                const errData = await response.json();
+                toast.error(`Error al reenviar: ${errData.error || 'Server error'}`, { id: loadingId });
+            } else {
+                toast.success(`La invitación fue reenviada con éxito a ${email}`, { id: loadingId });
+            }
+        } catch (error) {
+            console.error("Error al reenviar invitación:", error);
+            toast.error('Error al contactar al servidor', { id: loadingId });
         }
     };
 
@@ -335,9 +364,24 @@ export const UserManagementView = () => {
                                         </TableCell>
                                         <TableCell>{new Date(inv.created_at!).toLocaleDateString()}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="destructive" size="sm" onClick={() => setDeleteInvitationId(inv.id!)}>
-                                                <Trash2 className="h-3 w-3" />
-                                            </Button>
+                                            <div className="flex justify-end gap-2">
+                                                <Button 
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    onClick={() => handleResendInvitation(inv.email)}
+                                                    title="Reenviar invitación al correo"
+                                                >
+                                                    <RefreshCw className="h-3 w-3 mr-1" /> Reenviar
+                                                </Button>
+                                                <Button 
+                                                    variant="destructive" 
+                                                    size="sm" 
+                                                    onClick={() => setDeleteInvitationId(inv.id!)}
+                                                    title="Eliminar invitación"
+                                                >
+                                                    <Trash2 className="h-3 w-3" />
+                                                </Button>
+                                            </div>
                                         </TableCell>
                                     </TableRow>
                                 ))}
