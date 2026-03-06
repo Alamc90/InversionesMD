@@ -18,27 +18,28 @@ export default function UpdatePasswordPage() {
     const [showPassword, setShowPassword] = useState(false);
 
     useEffect(() => {
-        // Enforce session check
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (!session) {
-                // If checking the link, sometimes it takes a moment. 
-                // However, the hash fragment handling is usually done by supabase-js client automatically if on the same domain.
-                // We might need to listen to auth state change.
+        // Al cargar la página, analizamos la URL para ver si vino un mensaje de error desde Supabase
+        const hash = window.location.hash;
+        if (hash && hash.includes('error=')) {
+            const params = new URLSearchParams(hash.substring(1)); // quita el #
+            const errorDesc = params.get('error_description') || 'Error en el enlace de invitación';
+            toast.error(errorDesc.replace(/\+/g, ' '));
+        }
+
+        // Si tenemos un hash con access_token, Supabase debería establecer la sesión 
+        // automáticamente, pero nos aseguramos verificando
+        supabase.auth.getSession().then(({ data: { session }, error }) => {
+            if (error) {
+                console.error("Error al obtener sesión:", error);
             }
         });
         
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            if (event === 'PASSWORD_RECOVERY') {
-                // Only allowed when recovery flow triggers
-            }
-            if (!session) {
-                // If user is not logged in, they can't update password
-                // But for PKCE flow, the code exchange happens and session is set.
-            }
+            console.log("Evento Auth:", event);
         });
         
         return () => subscription.unsubscribe();
-    }, [router]);
+    }, []);
 
     const validatePassword = (pwd: string) => {
         if (pwd.length < 8) return "La contraseña debe tener al menos 8 caracteres";
@@ -71,13 +72,35 @@ export default function UpdatePasswordPage() {
 
         setLoading(true);
         try {
+            // Cuando vienes de un enlace de invitación manual, no tienes una sesión real activa para `updateUser`,
+            // ya que al generarlo programáticamente (`generateLink`), no hace el flujo automático en el navegador a menos
+            // que parseemos manualmente el hash. Como solo tenemos un token en la URL, 
+            // la manera más segura de registrarse la primera vez con ese token es usando `verifyOtp` o `setSession`
+            
+            const hash = window.location.hash;
+            if (hash && hash.includes('access_token=')) {
+                // Si la URL tiene el access_token mágico, lo usamos para establecer la sesión nosotros mismos
+                const params = new URLSearchParams(hash.substring(1));
+                const accessToken = params.get('access_token');
+                const refreshToken = params.get('refresh_token');
+                
+                if (accessToken && refreshToken) {
+                    const { error: sessionError } = await supabase.auth.setSession({
+                        access_token: accessToken,
+                        refresh_token: refreshToken
+                    });
+                    if (sessionError) throw sessionError;
+                }
+            }
+
+            // Ahora sí, que tenemos una sesión garantizada, actualizamos la contraseña
             const { error } = await supabase.auth.updateUser({ password: password });
             if (error) throw error;
             
-            toast.success("Contraseña actualizada correctamente");
+            toast.success("Contraseña establecida correctamente");
             router.push('/dashboard');
         } catch (error: any) {
-            toast.error(error.message || "Error al actualizar contraseña");
+            toast.error(error.message || "Error al establecer contraseña");
         } finally {
             setLoading(false);
         }
@@ -87,9 +110,9 @@ export default function UpdatePasswordPage() {
         <div className="flex items-center justify-center min-h-screen bg-slate-50 p-4">
              <Card className="w-full max-w-md">
                 <CardHeader className="text-center">
-                    <CardTitle className="text-2xl">Restablecer Contraseña</CardTitle>
+                    <CardTitle className="text-2xl">Bienvenido, Crea tu Contraseña</CardTitle>
                     <CardDescription>
-                        Ingrese su nueva contraseña
+                        Ingrese su nueva contraseña para activar su cuenta
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -158,7 +181,7 @@ export default function UpdatePasswordPage() {
                         </div>
 
                         <Button type="submit" className="w-full" disabled={loading}>
-                            {loading ? 'Actualizando...' : 'Actualizar Contraseña'}
+                            {loading ? 'Creando cuenta...' : 'Crear Cuenta y Entrar'}
                         </Button>
                     </form>
                 </CardContent>

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
     try {
-        const { email } = await request.json();
+        const { email, businessName } = await request.json();
 
         if (!email) {
             return NextResponse.json({ error: 'Email is required' }, { status: 400 });
@@ -31,9 +31,12 @@ export async function POST(request: Request) {
         // Determinar dinámicamente el dominio base (localhost o el deploy de Vercel)
         const origin = request.headers.get('origin') || process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
 
-        // Generar invitación de Supabase (Envía correo oficial de invitacion de Supabase)
+        // Generar invitación oficial (esto dispara en automático el correo si configuraste SMTP en Supabase)
         const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-            redirectTo: `${origin}/update-password` 
+            data: { 
+                invited_by_business: businessName || 'Sistema de Gestión' 
+            },
+            redirectTo: `${origin}/registro` 
         });
 
         if (error) {
@@ -44,6 +47,7 @@ export async function POST(request: Request) {
             throw error;
         }
 
+        // Devolvemos el success a la vista (quitamos action_link porque ya vas a usar correo automatizado)
         return NextResponse.json({ success: true, data });
     } catch (error: any) {
         console.error('Error al enviar invitación:', error);

@@ -27,6 +27,7 @@ export const UserManagementView = () => {
     const [inviteEmail, setInviteEmail] = useState('');
     const [inviteRole, setInviteRole] = useState<'admin' | 'employee'>('employee');
     const [invitePermissions, setInvitePermissions] = useState<UserPermissions>(DEFAULT_EMPLOYEE_PERMISSIONS);
+    const [isInviting, setIsInviting] = useState(false);
     
     // Edit permissions
     const [editingMember, setEditingMember] = useState<BusinessMember | null>(null);
@@ -69,7 +70,9 @@ export const UserManagementView = () => {
 
     const handleInvite = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!business?.id) return;
+        if (!business?.id || isInviting) return;
+
+        setIsInviting(true);
 
         try {
             // 1. Guardar la invitación en la base de datos
@@ -87,17 +90,25 @@ export const UserManagementView = () => {
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ email: inviteEmail }),
+                    body: JSON.stringify({ 
+                        email: inviteEmail,
+                        businessName: business.name
+                    }),
                 });
 
                 if (!response.ok) {
-                    console.warn("La invitación se guardó, pero hubo un error enviando el correo. ¿Falta SUPABASE_SERVICE_ROLE_KEY?");
+                    const errData = await response.json();
+                    console.warn("Hubo un error contactando al servidor para la invitación.");
+                    toast.error(`Error al enviar invitación: ${errData.error || 'Server error'}`);
+                } else {
+                    // Ahora que usamos SMTP funciona automático y de manera elegante por correo
+                    toast.success(`La invitación fue enviada con éxito al correo ${inviteEmail}`);
                 }
             } catch (mailError) {
                 console.error("Error contactando a la API de correos:", mailError);
+                toast.error('Error al contactar al servidor de correos');
             }
 
-            toast.success(`Invitación enviada a ${inviteEmail}`);
             setShowInviteDialog(false);
             setInviteEmail('');
             setInviteRole('employee');
@@ -105,6 +116,8 @@ export const UserManagementView = () => {
             loadData();
         } catch (error: any) {
             toast.error(error.message || 'Error al crear invitación');
+        } finally {
+            setIsInviting(false);
         }
     };
 
@@ -388,8 +401,12 @@ export const UserManagementView = () => {
                         )}
 
                         <div className="flex justify-end gap-2 pt-2">
-                            <Button type="button" variant="outline" onClick={() => setShowInviteDialog(false)}>Cancelar</Button>
-                            <Button type="submit">Enviar Invitación</Button>
+                            <Button type="button" variant="outline" onClick={() => setShowInviteDialog(false)} disabled={isInviting}>
+                                Cancelar
+                            </Button>
+                            <Button type="submit" disabled={isInviting || !inviteEmail}>
+                                {isInviting ? 'Enviando...' : 'Enviar Invitación'}
+                            </Button>
                         </div>
                     </form>
                 </DialogContent>
