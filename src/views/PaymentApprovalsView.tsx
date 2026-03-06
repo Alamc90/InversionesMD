@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { LoadingScreen } from '@/components/LoadingScreen';
 import { Button } from '@/components/ui/button';
@@ -21,11 +21,7 @@ export const PaymentApprovalsView = () => {
     const [processingId, setProcessingId] = useState<number | null>(null);
     const [denyTarget, setDenyTarget] = useState<number | null>(null);
 
-    useEffect(() => {
-        loadPendingPayments();
-    }, []);
-
-    const loadPendingPayments = async () => {
+    const loadPendingPayments = useCallback(async () => {
         setLoading(true);
         try {
             const data = await DataService.getPendingPayments();
@@ -36,7 +32,11 @@ export const PaymentApprovalsView = () => {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
+
+    useEffect(() => {
+        loadPendingPayments();
+    }, [loadPendingPayments]);
 
     const handleApprove = async (paymentId: number, amount: number) => {
         setProcessingId(paymentId);
@@ -207,7 +207,7 @@ export const PaymentApprovalsView = () => {
                 description="¿Está seguro de denegar este pago? Esta acción no se puede deshacer."
                 confirmLabel="Denegar Pago"
                 variant="warning"
-                onConfirm={() => denyTarget !== null && handleDeny(denyTarget)}
+                onConfirm={() => { if (denyTarget !== null) return handleDeny(denyTarget); }}
                 loading={processingId !== null}
             />
         </div>
