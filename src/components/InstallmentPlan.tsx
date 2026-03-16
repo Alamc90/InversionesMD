@@ -54,7 +54,9 @@ const InstallmentPlan: React.FC<Props> = ({ onSubmit, onBack }) => {
             setInstallments(template.total_installments);
             setInstallmentValue(template.installment_value);
             setFrequency(template.payment_frequency as any);
-            setDownPayment(template.down_payment || 0);
+            // Ensure down_payment is treated as a number
+            const dp = Number(template.down_payment);
+            setDownPayment(isNaN(dp) ? 0 : dp);
         }
     };
 

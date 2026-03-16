@@ -243,7 +243,7 @@ export const DataService = {
     // Only count APROBADO payments if new schema; otherwise count all
     let query = supabase
         .from('payment_records')
-        .select('amount, id')
+        .select('amount, id, note')
         .eq('plan_id', planId);
     
     if (newSchema) {
@@ -256,7 +256,13 @@ export const DataService = {
     
     let totalPaid = 0;
     if (allPayments) {
-        totalPaid = allPayments.reduce((sum, record) => sum + Number(record.amount), 0);
+        // Filter out down payments (notes containing "initial" or "abono inicial")
+        // This ensures the progress bar only reflects regular installments
+        const regularPayments = allPayments.filter((r: any) => {
+             const note = (r.note || '').toLowerCase();
+             return !note.includes('inicial');
+        });
+        totalPaid = regularPayments.reduce((sum, record) => sum + Number(record.amount), 0);
     }
     
     const rawPaid = instValue > 0 ? (totalPaid / instValue) : 0;
@@ -653,6 +659,29 @@ async getPaymentPlanTemplates(businessId?: string): Promise<PaymentPlanTemplate[
           .from('vehicles')
           .delete()
           .eq('id', id);
+      if (error) throw error;
+  },
+
+  async deleteCustomer(id: number) {
+      // 1. Get all vehicles for this customer
+      const { data: vehicles } = await supabase
+          .from('vehicles')
+          .select('id')
+          .eq('customer_id', id);
+
+      // 2. Delete each vehicle (and its related plans/payments)
+      if (vehicles && vehicles.length > 0) {
+          for (const vehicle of vehicles) {
+              await this.deleteVehicle(vehicle.id);
+          }
+      }
+
+      // 3. Delete the customer
+      const { error } = await supabase
+          .from('customers')
+          .delete()
+          .eq('id', id);
+          
       if (error) throw error;
   }
 };

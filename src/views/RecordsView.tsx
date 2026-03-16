@@ -25,6 +25,10 @@ export const RecordsView = () => {
     const [editingVehicle, setEditingVehicle] = useState<any | null>(null);
     const [deleteVehicleTarget, setDeleteVehicleTarget] = useState<any | null>(null);
     const [deletingVehicle, setDeletingVehicle] = useState(false);
+    
+    // New state for customer deletion
+    const [deleteCustomerTarget, setDeleteCustomerTarget] = useState<Customer | null>(null);
+    const [deletingCustomer, setDeletingCustomer] = useState(false);
 
     const loadData = useCallback(async () => {
         setLoading(true);
@@ -58,6 +62,20 @@ export const RecordsView = () => {
             loadData();
         } catch (error) {
             toast.error('Error al actualizar');
+        }
+    };
+
+    const handleDeleteCustomer = async (id: number) => {
+        setDeletingCustomer(true);
+        try {
+            await DataService.deleteCustomer(id);
+            toast.success('Cliente eliminado');
+            setDeleteCustomerTarget(null);
+            loadData();
+        } catch (error) {
+            toast.error('Error al eliminar cliente');
+        } finally {
+            setDeletingCustomer(false);
         }
     };
 
@@ -143,7 +161,12 @@ export const RecordsView = () => {
                                             <TableCell>{c.cedula}</TableCell>
                                             <TableCell>{c.phone}</TableCell>
                                             <TableCell>
-                                                <Button variant="outline" size="sm" onClick={() => setEditingCustomer(c)}>Editar</Button>
+                                                <div className="flex gap-2">
+                                                    <Button variant="outline" size="sm" onClick={() => setEditingCustomer(c)}>Editar</Button>
+                                                    <Button variant="destructive" size="sm" onClick={() => setDeleteCustomerTarget(c)}>
+                                                        <Trash2 className="h-3 w-3" />
+                                                    </Button>
+                                                </div>
                                             </TableCell>
                                         </TableRow>
                                     ))}
@@ -212,12 +235,33 @@ export const RecordsView = () => {
                                 <div className="space-y-2">
                                     <Label>Apellido</Label>
                                     <Input value={editingCustomer.last_name || ''} onChange={e => setEditingCustomer({...editingCustomer, last_name: e.target.value})} required/>
+    <div className="space-y-2">
+                                        <Label>Dirección</Label>
+                                        <Input value={editingCustomer.address || ''} onChange={e => setEditingCustomer({...editingCustomer, address: e.target.value})} />
+                                    </div>
+                                    
+                                    <div className="col-span-1 sm:col-span-2 pt-2 border-t mt-2">
+                                        <h4 className="font-semibold mb-2">Datos del Fiador</h4>
+                                    </div>
+                                    
+                                    <div className="space-y-2">
+                                        <Label>Fiador - Nombre</Label>
+                                        <Input value={editingCustomer.guarantor_first_name || ''} onChange={e => setEditingCustomer({...editingCustomer, guarantor_first_name: e.target.value})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Fiador - Apellido</Label>
+                                        <Input value={editingCustomer.guarantor_last_name || ''} onChange={e => setEditingCustomer({...editingCustomer, guarantor_last_name: e.target.value})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Fiador - Cédula</Label>
+                                        <Input value={editingCustomer.guarantor_cedula || ''} onChange={e => setEditingCustomer({...editingCustomer, guarantor_cedula: e.target.value})} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Fiador - Dirección</Label>
+                                        <Input value={editingCustomer.guarantor_address || ''} onChange={e => setEditingCustomer({...editingCustomer, guarantor_address: e.target.value})} />
+                                    </div>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Teléfono</Label>
-                                    <Input value={editingCustomer.phone || ''} onChange={e => setEditingCustomer({...editingCustomer, phone: e.target.value})} />
-                                </div>
-                                <div className="space-y-2">
+                                    <div className="space-y-2">
                                     <Label>Dirección</Label>
                                     <Input value={editingCustomer.address || ''} onChange={e => setEditingCustomer({...editingCustomer, address: e.target.value})} />
                                 </div>
@@ -247,7 +291,18 @@ export const RecordsView = () => {
                                 <div className="space-y-2">
                                     <Label>Color</Label>
                                     <Input value={editingVehicle.color || ''} onChange={e => setEditingVehicle({...editingVehicle, color: e.target.value})} required/>
-                                </div>
+              
+
+            <ConfirmDialog
+                open={deleteCustomerTarget !== null}
+                onOpenChange={(open) => !open && setDeleteCustomerTarget(null)}
+                title="Eliminar Cliente"
+                description={`¿Está seguro de eliminar al cliente ${deleteCustomerTarget?.first_name || ''} ${deleteCustomerTarget?.last_name || ''}? Se eliminarán AUTOMÁTICAMENTE todos sus vehículos y planes de pago asociados. Esta acción no se puede deshacer.`}
+                confirmLabel="Eliminar Cliente"
+                variant="danger"
+                onConfirm={() => { if (deleteCustomerTarget && deleteCustomerTarget.id) handleDeleteCustomer(deleteCustomerTarget.id); }}
+                loading={deletingCustomer}
+            />                  </div>
                                 <div className="space-y-2">
                                     <Label>Placa</Label>
                                     <Input value={editingVehicle.plate || ''} onChange={e => setEditingVehicle({...editingVehicle, plate: e.target.value})} required/>
