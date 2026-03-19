@@ -127,6 +127,11 @@ export const DataService = {
       const planPayload: any = {
             user_id: user.id,
             vehicle_id: vehicleData.id,
+            // Nuevos campos financieros
+            capital_amount: plan.capital_amount,
+            interest_rate: plan.interest_rate,
+            excluded_days: plan.excluded_days ? plan.excluded_days.join(',') : null,
+            
             total_installments: plan.total_installments,
             installment_value: plan.installment_value,
             installments_paid: 0,
@@ -614,7 +619,11 @@ async getPaymentPlanTemplates(businessId?: string): Promise<PaymentPlanTemplate[
           total_installments: template.total_installments,
           installment_value: template.installment_value,
           payment_frequency: template.payment_frequency,
-          down_payment: template.down_payment
+          down_payment: template.down_payment,
+          price: template.price || 0,
+          interest_rate: template.interest_rate || 0,
+          months: template.months || 0,
+          excluded_days: template.excluded_days || []
       };
       if (businessId) payload.business_id = businessId;
 

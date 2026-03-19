@@ -15,6 +15,7 @@ import { isPrinterConnected } from "@/lib/thermalPrinter";
 import { BusinessConfig } from "@/models/BusinessConfig";
 import { useAuth } from '@/contexts/AuthContext';
 import { PAYMENT_STATUS_LABELS, PAYMENT_STATUS_COLORS, PaymentStatus } from '@/models/Payment';
+import { PaymentCalculator } from '@/services/PaymentCalculator';
 
 interface Props {
     vehicleId: number;
@@ -38,6 +39,10 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const [loadingData, setLoadingData] = useState(false);
     const [processing, setProcessing] = useState(false);
     const [paymentType, setPaymentType] = useState<'regular' | 'down_payment'>('regular');
+    
+    // Liquidation state
+    const [isLiquidationOpen, setIsLiquidationOpen] = useState(false);
+    const [liquidationPercentage, setLiquidationPercentage] = useState<number | ''>(5);
 
     useEffect(() => {
         if (isOpen && vehicleId) {
@@ -154,6 +159,54 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
         }
     };
 
+    const openLiquidationModal = () => {
+        setIsLiquidationOpen(true);
+    };
+
+    const confirmLiquidation = () => {
+        const plans = Array.isArray(details?.installment_plans) ? details.installment_plans : (details?.installment_plans ? [details.installment_plans] : []);
+        if (plans.length > 0) {
+            const p = plans[0];
+            
+            const remainingInst = Math.max(0, Number(p.total_installments) - Number(p.installments_paid));
+            let remainingMonths = 0;
+            const freq = p.payment_frequency;
+            
+            if (freq === 'MENSUAL') remainingMonths = remainingInst;
+            else if (freq === 'QUINCENAL') remainingMonths = remainingInst / 2;
+            else if (freq === 'SEMANAL') remainingMonths = remainingInst / 4;
+            else if (freq === 'DIARIO') {
+                const excludedCount = p.excluded_days?.length || 0;
+                const daysPerMonth = 30 - (excludedCount * 4.3);
+                remainingMonths = remainingInst / Math.max(1, daysPerMonth);
+            }
+            // Redondear meses a su valor más cercano para cálculo equitativo
+            remainingMonths = Math.round(remainingMonths);
+            const originalBikePrice = (Number(p.capital_amount) || 0) + (Number(p.down_payment) || 0);
+            
+            const liqPerc = Number(liquidationPercentage) || 0;
+            const liquidationInterest = remainingMonths * (liqPerc / 100) * originalBikePrice;
+            
+            // Total ya pagado, sin contar abonos a la inicial
+            const totalGiven = Number(p.installments_paid) * Number(p.installment_value);
+            
+            const amountToPay = Math.max(0, originalBikePrice + liquidationInterest - totalGiven);
+
+            setPaymentAmount(Math.round(amountToPay));
+            setPaymentType('regular');
+            setPaymentNote(`Liquidación Total Anticipada (Interés: ${liqPerc}%, Meses faltantes: ${remainingMonths})`);
+            
+            setIsLiquidationOpen(false);
+            setShowCustomAmount(true);
+            toast.info("Monto de liquidación calculado y cargado.");
+        }
+    };
+
+    const payoffDebt = () => {
+        // Redirigir botón antiguo al nuevo flujo
+        openLiquidationModal();
+    };
+
     const handlePayment = async () => {
         setIsConfirmOpen(true);
     };
@@ -265,6 +318,24 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const totalDownPaymentPaid = downPaymentRecords.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
     const totalDownPayment = Number(plan?.down_payment) || 0;
     const remainingDownPayment = Math.max(0, totalDownPayment - totalDownPaymentPaid);
+
+    // --- Live Liquidation Calculation ---
+    const liqRemainingInst = Math.max(0, totalInstallments - installmentsPaid);
+    let liqRemainingMonths = 0;
+    const liqFreq = plan?.payment_frequency || 'MENSUAL';
+    if (liqFreq === 'MENSUAL') liqRemainingMonths = liqRemainingInst;
+    else if (liqFreq === 'QUINCENAL') liqRemainingMonths = liqRemainingInst / 2;
+    else if (liqFreq === 'SEMANAL') liqRemainingMonths = liqRemainingInst / 4;
+    else if (liqFreq === 'DIARIO') {
+        const excludedCount = plan?.excluded_days?.length || 0;
+        const daysPerMonth = 30 - (excludedCount * 4.3);
+        liqRemainingMonths = liqRemainingInst / Math.max(1, daysPerMonth);
+    }
+    liqRemainingMonths = Math.round(liqRemainingMonths);
+    const liqOriginalBikePrice = (Number(plan?.capital_amount) || 0) + totalDownPayment;
+    const liqInterest = liqRemainingMonths * ((Number(liquidationPercentage) || 0) / 100) * liqOriginalBikePrice;
+    const liqTotalGiven = (installmentsPaid * installmentVal) + totalDownPaymentPaid;
+    const liqAmountToPay = Math.max(0, liqOriginalBikePrice + liqInterest - liqTotalGiven);
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => {
@@ -432,6 +503,22 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                             <span className="font-medium text-yellow-600 font-bold text-right">${remainingDownPayment.toLocaleString()}</span>
                                         </div>
                                     )}
+                                    {plan?.capital_amount ? (
+                                        <>
+                                            <div className="flex justify-between items-center py-0.5 border-t mt-2 pt-2">
+                                                <span className="text-muted-foreground text-sm">Capital Financiado:</span>
+                                                <span className="font-medium text-right">${plan.capital_amount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-0.5 border-t">
+                                                <span className="text-muted-foreground text-sm">Intereses Totales{plan.interest_rate ? ` (${plan.interest_rate}% mes)` : ''}:</span>
+                                                <span className="font-medium text-right">${( (totalInstallments * installmentVal) - plan.capital_amount ).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                                            </div>
+                                            <div className="flex justify-between items-center py-1 mt-1 border-t bg-secondary/20 -mx-2 px-2 rounded">
+                                                <span className="text-muted-foreground text-sm font-semibold">Monto Total (Deuda):</span>
+                                                <span className="font-medium text-primary font-bold text-right">${(totalInstallments * installmentVal).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</span>
+                                            </div>
+                                        </>
+                                    ) : null}
                                 </div>
                             </CardContent>
                         </Card>
@@ -512,6 +599,16 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                         >
                                             <Edit3 className="h-4 w-4 mr-1" />
                                             Personalizado
+                                        </Button>
+                                    </div>
+                                    
+                                    <div className="flex w-full pt-1">
+                                        <Button
+                                            variant="outline"
+                                            className="w-full text-green-600 border-green-200 hover:bg-green-50"
+                                            onClick={() => { payoffDebt(); setShowCustomAmount(false); }}
+                                        >
+                                            Liquidar Totalidad (Ahorro Intereses)
                                         </Button>
                                     </div>
 
@@ -673,6 +770,52 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                 <Button onClick={confirmPayment} disabled={processing}>
                                     {processing ? 'Procesando...' : 'Aceptar Pago'}
                                 </Button>
+                            </div>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+
+                {/* Modal de Liquidación */}
+                <Dialog open={isLiquidationOpen} onOpenChange={setIsLiquidationOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Liquidación Total Anticipada</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Porcentaje de Liquidación (%)</label>
+                                <Input 
+                                    type="number" 
+                                    value={liquidationPercentage} 
+                                    onChange={(e) => setLiquidationPercentage(e.target.value ? Number(e.target.value) : '')}
+                                    placeholder="Ej: 5"
+                                />
+                            </div>
+                            <div className="bg-muted p-4 rounded-lg space-y-2 text-sm">
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Meses Faltantes (Aprox):</span>
+                                    <span className="font-medium">{liqRemainingMonths}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Valor Original de la Moto:</span>
+                                    <span className="font-medium">${liqOriginalBikePrice.toLocaleString(undefined, {minimumFractionDigits: 0})}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Intereses por Liquidación:</span>
+                                    <span className="font-medium text-amber-600">+ ${liqInterest.toLocaleString(undefined, {minimumFractionDigits: 0})}</span>
+                                </div>
+                                <div className="flex justify-between">
+                                    <span className="text-muted-foreground">Total Ya Pagado (Sin abonos):</span>
+                                    <span className="font-medium text-green-600">- ${liqTotalGiven.toLocaleString(undefined, {minimumFractionDigits: 0})}</span>
+                                </div>
+                                <div className="flex justify-between border-t pt-2 mt-2 font-bold text-lg">
+                                    <span>Monto a Pagar:</span>
+                                    <span className="text-primary">${Math.round(liqAmountToPay).toLocaleString()}</span>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <Button variant="outline" onClick={() => setIsLiquidationOpen(false)}>Cancelar</Button>
+                                <Button onClick={confirmLiquidation}>Cargar monto a pago</Button>
                             </div>
                         </div>
                     </DialogContent>

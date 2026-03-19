@@ -2,6 +2,12 @@ export interface InstallmentPlan {
     id?: number;
     vehicle_id?: number;
     business_id?: string;
+    
+    // Configuración Financiera
+    capital_amount?: number;    // Monto financiado (Precio - Inicial)
+    interest_rate?: number;     // % de Interés Mensual
+    excluded_days?: string[];   // Días de la semana excluidos (ej: ['Domingo'])
+
     total_installments: number; // "cantidad X de cuotas"
     installment_value: number;  // "valor de la cuota"
     installments_paid: number;  // "X cuotas de X total"

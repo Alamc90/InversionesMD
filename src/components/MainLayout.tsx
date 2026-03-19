@@ -6,7 +6,7 @@ import { supabase } from '@/config/supabaseClient';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { Session } from '@supabase/supabase-js';
-import { Settings, DollarSign, ClipboardCheck, Menu, X, Plus, LayoutDashboard, FileText, LogOut, WifiOff, RefreshCw } from 'lucide-react';
+import { Settings, DollarSign, ClipboardCheck, Menu, X, Plus, LayoutDashboard, FileText, Calculator, LogOut, WifiOff, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { PrinterStatusBadge } from '@/components/PrinterSetup';
 import { LoadingScreen } from '@/components/LoadingScreen';
@@ -205,6 +205,7 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
         showBalance && { href: '/balance', label: 'Balance', icon: DollarSign },
         showApprovals && { href: '/aprobaciones', label: 'Aprobaciones', icon: ClipboardCheck },
         showRecords && { href: '/registros', label: 'Registros', icon: FileText },
+        showConfig && { href: '/simulador', label: 'Simulador', icon: Calculator }, 
         showConfig && { href: '/configuracion', label: 'Configuración', icon: Settings },
     ].filter(Boolean) as { href: string; label: string; icon: any; isGreen?: boolean }[];
 

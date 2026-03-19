@@ -291,18 +291,7 @@ export const RecordsView = () => {
                                 <div className="space-y-2">
                                     <Label>Color</Label>
                                     <Input value={editingVehicle.color || ''} onChange={e => setEditingVehicle({...editingVehicle, color: e.target.value})} required/>
-              
-
-            <ConfirmDialog
-                open={deleteCustomerTarget !== null}
-                onOpenChange={(open) => !open && setDeleteCustomerTarget(null)}
-                title="Eliminar Cliente"
-                description={`¿Está seguro de eliminar al cliente ${deleteCustomerTarget?.first_name || ''} ${deleteCustomerTarget?.last_name || ''}? Se eliminarán AUTOMÁTICAMENTE todos sus vehículos y planes de pago asociados. Esta acción no se puede deshacer.`}
-                confirmLabel="Eliminar Cliente"
-                variant="danger"
-                onConfirm={() => { if (deleteCustomerTarget && deleteCustomerTarget.id) handleDeleteCustomer(deleteCustomerTarget.id); }}
-                loading={deletingCustomer}
-            />                  </div>
+                                </div>
                                 <div className="space-y-2">
                                     <Label>Placa</Label>
                                     <Input value={editingVehicle.plate || ''} onChange={e => setEditingVehicle({...editingVehicle, plate: e.target.value})} required/>
@@ -313,6 +302,17 @@ export const RecordsView = () => {
                     )}
                 </DialogContent>
             </Dialog>
+
+            <ConfirmDialog
+                open={deleteCustomerTarget !== null}
+                onOpenChange={(open) => !open && setDeleteCustomerTarget(null)}
+                title="Eliminar Cliente"
+                description={`¿Está seguro de eliminar al cliente ${deleteCustomerTarget?.first_name || ''} ${deleteCustomerTarget?.last_name || ''}? Se eliminarán AUTOMÁTICAMENTE todos sus vehículos y planes de pago asociados. Esta acción no se puede deshacer.`}
+                confirmLabel="Eliminar Cliente"
+                variant="danger"
+                onConfirm={() => { if (deleteCustomerTarget && deleteCustomerTarget.id) handleDeleteCustomer(deleteCustomerTarget.id); }}
+                loading={deletingCustomer}
+            />
 
             <ConfirmDialog
                 open={deleteVehicleTarget !== null}

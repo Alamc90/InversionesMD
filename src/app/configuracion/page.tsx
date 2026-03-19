@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useAuth } from '@/contexts/AuthContext';
 import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 import { BusinessService } from '@/services/BusinessService';
+import { PaymentCalculator } from '@/services/PaymentCalculator';
 import dynamic from 'next/dynamic';
 
 // Lazy-load heavy tab components - only loaded when their tab is active
@@ -62,8 +63,39 @@ export default function ConfigurationPage() {
         total_installments: 0,
         installment_value: 0,
         payment_frequency: 'DIARIO',
-        down_payment: 0
+        down_payment: 0,
+        price: 0,
+        interest_rate: 10,
+        months: 12,
+        excluded_days: []
     });
+
+    const [excludedDay, setExcludedDay] = useState<string>('ninguno');
+
+    const handleCalculatePlan = () => {
+        const result = PaymentCalculator.calculatePlanDetails({
+            price: newTemplate.price || 0,
+            downPayment: newTemplate.down_payment || 0,
+            paymentFrequency: newTemplate.payment_frequency as any,
+            excludedDays: excludedDay !== 'ninguno' ? [excludedDay] : [],
+            interestRate: newTemplate.interest_rate,
+            installmentValue: newTemplate.installment_value || undefined, // Send if present
+            totalInstallments: newTemplate.total_installments || undefined, // Send if present
+            months: newTemplate.months || 0
+        });
+
+        if (result) {
+            setNewTemplate(prev => ({
+                ...prev,
+                total_installments: result.numberOfInstallments,
+                installment_value: result.installmentValue,
+                interest_rate: result.interestRate,
+                months: result.months,
+                excluded_days: excludedDay !== 'ninguno' ? [excludedDay] : []
+            }));
+            toast.success("Cuotas y valores calculados dinámicamente");
+        }
+    };
 
     useEffect(() => {
         const loadAll = async () => {
@@ -120,15 +152,24 @@ export default function ConfigurationPage() {
         e.preventDefault();
         setSaving(true);
         try {
-            const saved = await DataService.savePaymentPlanTemplate(newTemplate as PaymentPlanTemplate);
+            const templateToSave = {
+                ...newTemplate,
+                excluded_days: excludedDay !== 'ninguno' ? [excludedDay] : []
+            };
+            const saved = await DataService.savePaymentPlanTemplate(templateToSave as PaymentPlanTemplate);
             setTemplates([...templates, saved]);
             setNewTemplate({
                 name: '',
                 total_installments: 0,
                 installment_value: 0,
                 payment_frequency: 'DIARIO',
-                down_payment: 0
+                down_payment: 0,
+                price: 0,
+                interest_rate: 10,
+                months: 12,
+                excluded_days: []
             });
+            setExcludedDay('ninguno');
             toast.success("Plan predefinido creado.");
         } catch (error) {
             console.error(error);
@@ -363,33 +404,50 @@ export default function ConfigurationPage() {
                                                 placeholder="Ej. Plan 300 cuotas diarias" required
                                             />
                                         </div>
+
+                                        <div className="space-y-2">
+                                            <Label>Precio de la Moto Referencia</Label>
+                                            <Input 
+                                                type="text" 
+                                                inputMode="numeric"
+                                                value={newTemplate.price ? formatCurrency(newTemplate.price) : ''}
+                                                onChange={(e) => setNewTemplate({...newTemplate, price: parseCurrency(e.target.value)})} 
+                                                placeholder="$0.00"
+                                            />
+                                        </div>
+
                                         <div className="space-y-2">
                                             <Label>Cuota Inicial (Abono)</Label>
                                             <Input 
                                                 type="text" 
+                                                inputMode="numeric"
                                                 value={newTemplate.down_payment ? formatCurrency(newTemplate.down_payment) : ''}
                                                 onChange={(e) => setNewTemplate({...newTemplate, down_payment: parseCurrency(e.target.value)})} 
                                                 placeholder="$0.00"
                                             />
                                         </div>
+
                                         <div className="space-y-2">
-                                            <Label>Valor de la Cuota</Label>
+                                            <Label>Tasa de Interés (% Mensual)</Label>
+                                            <Input 
+                                                type="number"
+                                                value={newTemplate.interest_rate !== undefined ? newTemplate.interest_rate : ''}
+                                                onChange={(e) => setNewTemplate({...newTemplate, interest_rate: e.target.value === '' ? undefined : parseFloat(e.target.value)})}
+                                                placeholder="Ej. 10"
+                                            />
+                                        </div>
+                                        
+                                        <div className="space-y-2">
+                                            <Label>Plazo (Meses)</Label>
                                             <Input 
                                                 type="text" 
-                                                value={newTemplate.installment_value ? formatCurrency(newTemplate.installment_value) : ''}
-                                                onChange={(e) => setNewTemplate({...newTemplate, installment_value: parseCurrency(e.target.value)})} 
-                                                placeholder="$0.00" required
+                                                inputMode="numeric"
+                                                value={newTemplate.months || ''}
+                                                onChange={(e) => setNewTemplate({...newTemplate, months: parseFloat(e.target.value) || 0})}
+                                                placeholder="Ej. 12 o 24"
                                             />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label>Cantidad de Cuotas</Label>
-                                            <Input 
-                                                type="number" min="1"
-                                                value={newTemplate.total_installments || ''} 
-                                                onChange={(e) => setNewTemplate({...newTemplate, total_installments: parseInt(e.target.value)})} 
-                                                placeholder="Ej. 300" required
-                                            />
-                                        </div>
+                                        
                                         <div className="space-y-2">
                                             <Label>Frecuencia</Label>
                                             <Select 
@@ -407,9 +465,56 @@ export default function ConfigurationPage() {
                                                 </SelectContent>
                                             </Select>
                                         </div>
+
+                                        {newTemplate.payment_frequency === 'DIARIO' && (
+                                            <div className="space-y-2">
+                                                <Label>Día Libre</Label>
+                                                <Select value={excludedDay} onValueChange={setExcludedDay}>
+                                                    <SelectTrigger>
+                                                        <SelectValue placeholder="Ninguno" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="ninguno">Ninguno</SelectItem>
+                                                        <SelectItem value="domingo">Domingo</SelectItem>
+                                                        <SelectItem value="sabado">Sábado</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        )}
+
+                                        <div className="space-y-2">
+                                            <Label>Valor de la Cuota</Label>
+                                            <Input 
+                                                type="text" 
+                                                inputMode="numeric"
+                                                value={newTemplate.installment_value ? formatCurrency(newTemplate.installment_value) : ''}
+                                                onChange={(e) => setNewTemplate({...newTemplate, installment_value: parseCurrency(e.target.value)})} 
+                                                placeholder="$0.00" required
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Cantidad de Cuotas</Label>
+                                            <Input 
+                                                type="text" 
+                                                inputMode="numeric"
+                                                value={newTemplate.total_installments || ''} 
+                                                onChange={(e) => setNewTemplate({...newTemplate, total_installments: parseInt(e.target.value)})} 
+                                                placeholder="Ej. 300" required
+                                            />
+                                        </div>
                                     </CardContent>
-                                    <CardFooter className="flex justify-end">
-                                        <Button type="submit" disabled={saving}>Agregar Plan</Button>
+                                    <CardFooter className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-muted/20 p-4 border-t rounded-b-lg">
+                                        <div className="text-lg font-semibold w-full sm:w-auto text-center sm:text-left">
+                                            Total: <span className="text-primary">{formatCurrency((newTemplate.installment_value || 0) * (newTemplate.total_installments || 0))}</span>
+                                        </div>
+                                        <div className="flex gap-2 w-full sm:w-auto">
+                                            <Button type="button" variant="secondary" onClick={handleCalculatePlan} className="flex-1 sm:flex-none">
+                                                Calcular plan
+                                            </Button>
+                                            <Button type="submit" disabled={saving} className="flex-1 sm:flex-none">
+                                                Guardar Plan
+                                            </Button>
+                                        </div>
                                     </CardFooter>
                                 </form>
                             </Card>
@@ -432,6 +537,7 @@ export default function ConfigurationPage() {
                                             <p><span className="text-muted-foreground">Inicial:</span> {formatCurrency(t.down_payment || 0)}</p>
                                             <p><span className="text-muted-foreground">Cuota:</span> {formatCurrency(t.installment_value)} x {t.total_installments}</p>
                                             <p><span className="text-muted-foreground">Frecuencia:</span> {t.payment_frequency}</p>
+                                            <p><span className="text-muted-foreground">Plazo:</span> {t.months || 0} meses al {t.interest_rate || 0}%</p>
                                             <p className="border-t pt-1 mt-1 font-bold">
                                                 Total: {formatCurrency((t.installment_value * t.total_installments) + Number(t.down_payment || 0))}
                                             </p>
