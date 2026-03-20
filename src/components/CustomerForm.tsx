@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
-import DataService from '../services/DataService';
+import { DataService } from '../services/DataService';
 
 interface Props {
     onSubmit: (data: Customer) => void;
