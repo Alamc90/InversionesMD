@@ -78,12 +78,12 @@ export const IssueBikeView: React.FC = () => {
                         }} className="space-y-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="model">Modelo</Label>
-                                    <Input id="model" name="model" placeholder="Modelo" required />
+                                    <Label htmlFor="model">Marca/Línea</Label>
+                                    <Input id="model" name="model" placeholder="Marca/Línea" required />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="year">Año</Label>
-                                    <Input id="year" name="year" type="number" placeholder="Año" required />
+                                    <Label htmlFor="year">Modelo</Label>
+                                    <Input id="year" name="year" type="number" placeholder="Modelo" required />
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="color">Color</Label>

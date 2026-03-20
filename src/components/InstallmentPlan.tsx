@@ -49,19 +49,15 @@ const InstallmentPlan: React.FC<Props> = ({ onSubmit, onBack }) => {
     }, []);
 
     const handleCalculatePlan = () => {
-        // Ejecutar el cálculo inteligente al igual que en "Crear Plan Predefinido"
-        const finalInterest = interestRate === '' ? undefined : Number(interestRate);
-        const finalMonths = months === '' ? 0 : Number(months);
-        
         const result = PaymentCalculator.calculatePlanDetails({
             price,
             downPayment,
             paymentFrequency: frequency,
             excludedDays: excludedDay !== 'ninguno' ? [excludedDay] : [],
-            interestRate: finalInterest,
+            interestRate: interestRate === '' ? undefined : Number(interestRate),
             installmentValue: installmentValue || undefined,
             totalInstallments: installments === '' ? undefined : Number(installments),
-            months: finalMonths
+            months: months === '' ? 0 : Number(months)
         });
 
         if (result) {
@@ -135,6 +131,25 @@ const InstallmentPlan: React.FC<Props> = ({ onSubmit, onBack }) => {
                 <CardTitle>Plan de Pagos: Financiación</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+                {templates.length > 0 && (
+                    <div className="space-y-2 pb-4 border-b">
+                        <Label htmlFor="template">Plantilla de Plan (Opcional)</Label>
+                        <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
+                            <SelectTrigger>
+                                <SelectValue placeholder="Seleccione una plantilla" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="custom">-- Personalizado --</SelectItem>
+                                {templates.map(t => (
+                                    <SelectItem key={t.id} value={t.id as string}>
+                                        {t.name}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    </div>
+                )}
+                
                 <div className="space-y-2">
                     <Label htmlFor="price">Precio de la Moto</Label>
                     <Input
@@ -183,25 +198,6 @@ const InstallmentPlan: React.FC<Props> = ({ onSubmit, onBack }) => {
                     </div>
                 </div>
 
-                {templates.length > 0 && (
-                    <div className="space-y-2 pb-4 border-b">
-                        <Label htmlFor="template">Plantilla de Plan (Opcional)</Label>
-                        <Select value={selectedTemplateId} onValueChange={handleTemplateChange}>
-                            <SelectTrigger>
-                                <SelectValue placeholder="Seleccione una plantilla" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="custom">-- Personalizado --</SelectItem>
-                                {templates.map(t => (
-                                    <SelectItem key={t.id} value={t.id as string}>
-                                        {t.name}
-                                    </SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                    </div>
-                )}
-
                 <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                         <Label htmlFor="frequency">Frecuencia</Label>
@@ -228,8 +224,12 @@ const InstallmentPlan: React.FC<Props> = ({ onSubmit, onBack }) => {
                                 <SelectContent>
                                     <SelectItem value="ninguno">Ninguno</SelectItem>
                                     <SelectItem value="domingo">Domingo</SelectItem>
-                                    <SelectItem value="sabado">Sábado</SelectItem>
                                     <SelectItem value="lunes">Lunes</SelectItem>
+                                    <SelectItem value="martes">Martes</SelectItem>
+                                    <SelectItem value="miercoles">Miércoles</SelectItem>
+                                    <SelectItem value="jueves">Jueves</SelectItem>
+                                    <SelectItem value="viernes">Viernes</SelectItem>
+                                    <SelectItem value="sabado">Sábado</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>

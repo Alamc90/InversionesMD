@@ -60,11 +60,11 @@ export class PaymentCalculator {
             return {
                 capitalAmount: financedAmount,
                 interestRate: rate,
-                months: Number(months.toFixed(1)),
-                totalInterest: Number(totalInterest.toFixed(2)),
-                totalToPay: Number(amountToSpread.toFixed(2)),
+                months: Number(months.toFixed(2)),
+                totalInterest: Math.round(totalInterest),
+                totalToPay: Math.round(amountToSpread),
                 numberOfInstallments: Math.floor(numberOfInstallments),
-                installmentValue: Number(installmentValue.toFixed(2))
+                installmentValue: Math.round(installmentValue)
             };
         } 
         
@@ -81,50 +81,38 @@ export class PaymentCalculator {
             
             return {
                 capitalAmount: financedAmount,
-                interestRate: Number(rate.toFixed(2)),
-                months: Number(months.toFixed(1)),
-                totalInterest: Number(totalInterest.toFixed(2)),
-                totalToPay: Number(totalToPayInInstallments.toFixed(2)),
+                // Preservamos todos los decimales de la tasa para ser exactos al recalcular
+                interestRate: Number(rate.toFixed(10)), 
+                months: Number(months.toFixed(2)),
+                totalInterest: Math.round(totalInterest),
+                totalToPay: Math.round(totalToPayInInstallments),
                 numberOfInstallments: Math.floor(numberOfInstallments),
-                installmentValue: Number(installmentValue.toFixed(2))
+                installmentValue: Math.round(installmentValue)
             };
         }
         
-        // FLuJo 3: Tenemos Installment Value y Rate, pero queremos predecir Cuotas (Installments / Meses)
+        // FLuJo 3: Tenemos Installment Value y Rate Ambos
         else if (installmentValue !== undefined && installmentValue > 0 && rate !== undefined && rate > 0) {
-             // Total to pay = Financed + (Price * Rate * Months)
-             // Total to pay = InstallmentValue * Installments
-             // Sabemos que Installments depende de Months y Frecuencia.
-             // Esto es más complejo. Una aproximación: asumimos Frecuencia Mensual para el despeje directo
-             // InstallmentValue * (Months * factor) = Financed + Price * Rate * Months
-             // Months * (InstallmentValue * factor - Price * Rate) = Financed
-             // Months = Financed / (InstallmentValue * factor - Price * Rate)
-             
-             let factor = 1;
-             if (frequency === 'QUINCENAL') factor = 2;
-             if (frequency === 'SEMANAL') factor = 4;
-             if (frequency === 'DIARIO') factor = 26; // approx
+             // El usuario (o la plantilla) nos está enviando tanto cuota fija como tasa.
+             // Para sistemas financieros reales, la cuota sellada (installmentValue * numberOfInstallments)
+             // manda sobre el porcentaje visual aproximado.
+             const totalToPayInInstallments = installmentValue * numberOfInstallments;
+             const totalInterest = totalToPayInInstallments - financedAmount;
 
-             const denom = (installmentValue * factor) - (price * (rate / 100));
-             if (denom > 0) {
-                 months = financedAmount / denom;
-                 installments = Math.ceil(months * factor);
-             } else {
-                 months = 12;
-                 installments = Math.ceil(months * factor);
+             // Calculamos la tasa matemática real silenciosa
+             let exactRate = 0;
+             if (price > 0 && months > 0) {
+                 exactRate = (totalInterest / (price * months)) * 100;
              }
-
-             const totalInterest = price * (rate / 100) * months;
-             const amountToSpread = financedAmount + totalInterest;
 
              return {
                 capitalAmount: financedAmount,
-                interestRate: rate,
-                months: Number(months.toFixed(1)),
-                totalInterest: Number(totalInterest.toFixed(2)),
-                totalToPay: Number(amountToSpread.toFixed(2)),
-                numberOfInstallments: installments,
-                installmentValue: Number(installmentValue.toFixed(2))
+                interestRate: Number(exactRate.toFixed(2)), // Sobreescribe con la tasa que encaja perfecto
+                months: Number(months.toFixed(2)),
+                totalInterest: Math.round(totalInterest),
+                totalToPay: Math.round(totalToPayInInstallments),
+                numberOfInstallments: Math.floor(numberOfInstallments),
+                installmentValue: Math.round(installmentValue)
             };
         }
         

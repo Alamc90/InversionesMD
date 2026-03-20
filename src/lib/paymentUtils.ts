@@ -1,49 +1,80 @@
+import { addDays, getDay, startOfDay, isBefore, isAfter, isSameDay } from 'date-fns';
+
 export function calculateOverdueInfo(plan: any): { overdueInstallments: number, nextDueDate: Date | null } {
     if (!plan || !plan.start_date) {
         return { overdueInstallments: 0, nextDueDate: null };
     }
     
-    const startDate = new Date(plan.start_date);
-    const now = new Date();
+    // Parse using local timezone logic
+    const startDateStr = plan.start_date.split('T')[0];
+    const [year, month, day] = startDateStr.split('-').map(Number);
+    const startDate = startOfDay(new Date(year, month - 1, day));
+    const now = startOfDay(new Date());
     
-    // Calculate days elapsed since start
-    const diffTime = now.getTime() - startDate.getTime();
-    if (diffTime < 0) {
+    if (isAfter(startDate, now)) {
         // Start date is in the future
         return { overdueInstallments: 0, nextDueDate: startDate };
     }
     
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-    
-    let daysPerPeriod = 7; // Default Semanal
-    if (plan.payment_frequency === 'DIARIO') daysPerPeriod = 1;
-    if (plan.payment_frequency === 'SEMANAL') daysPerPeriod = 7;
-    if (plan.payment_frequency === 'QUINCENAL') daysPerPeriod = 15;
-    if (plan.payment_frequency === 'MENSUAL') daysPerPeriod = 30;
-
-    // Installments that *should* have been accumulated by now
-    // If 10 days passed and period is 7, then 1 installment should have passed (technically 1.4)
-    // Floor because you don't owe the 2nd one until the 14th day
-    const periodsElapsed = Math.floor(diffDays / daysPerPeriod);
-    
-    // Installments paid so far
     const paid = Number(plan.installments_paid) || 0;
     
-    // Overdue = What should have been paid - What has been paid
-    // Ideally periodsElapsed includes the current one IF it's due today? 
-    // Usually "Next Due" implies the upcoming one. 
-    // If today is day 7 (1 period exactly), is it overdue? Yes usually.
-    // Let's stick to the previous logic: 
-    // periodsElapsed calculated by Math.floor(diffDays / daysPerPeriod) implies full periods passed.
-    
-    const overdue = Math.max(0, periodsElapsed - paid);
+    let periodsElapsed = 0;
+    let nextDue = new Date(startDate);
 
-    // Next due date calculation
-    const nextDue = new Date(startDate);
-    // The next payment is the (paid + 1)th installment
-    // e.g. paid 0, next is #1. paid 5, next is #6.
-    const nextInstallmentNumber = Math.floor(paid) + 1;
-    nextDue.setDate(startDate.getDate() + (nextInstallmentNumber * daysPerPeriod));
+    if (plan.payment_frequency === 'DIARIO') {
+        const dayMap: Record<string, number> = {
+            'domingo': 0, 'lunes': 1, 'martes': 2, 'miercoles': 3, 
+            'jueves': 4, 'viernes': 5, 'sabado': 6
+        };
+        const excludedDays = (plan.excluded_days || []).map((d: string) => dayMap[d.toLowerCase()] ?? -1);
+
+        // Calculate periods elapsed (valid days only)
+        let currentDate = new Date(startDate);
+        // Exclude start date itself? Normally start date is Day 0 (no payment due). Payments start on Day 1.
+        // Wait, "usually loans don't pay on Day 0" - so start counting from startDate + 1.
+        // But what if startDate is a valid payment day, and the user pays a cuota?
+        // Let's assume daily payments evaluate the first installment on start_date + 1 valid day.
+        
+        let validDaysElapsed = 0;
+        let iterDate = addDays(startDate, 1);
+        while (isBefore(iterDate, now) || isSameDay(iterDate, now)) {
+            if (!excludedDays.includes(getDay(iterDate))) {
+                validDaysElapsed++;
+            }
+            iterDate = addDays(iterDate, 1);
+        }
+        periodsElapsed = validDaysElapsed;
+
+        // Calculate next due date (jump forward 'paid + 1' valid days from start date)
+        let targetValidDays = paid + 1;
+        let currentValidDays = 0;
+        let walkDate = new Date(startDate);
+        while (currentValidDays < targetValidDays) {
+            walkDate = addDays(walkDate, 1);
+            if (!excludedDays.includes(getDay(walkDate))) {
+                currentValidDays++;
+            }
+        }
+        nextDue = walkDate;
+        
+    } else {
+        // For other frequencies
+        let daysPerPeriod = 7;
+        if (plan.payment_frequency === 'SEMANAL') daysPerPeriod = 7;
+        if (plan.payment_frequency === 'QUINCENAL') daysPerPeriod = 15;
+        if (plan.payment_frequency === 'MENSUAL') daysPerPeriod = 30; // Approximation
+
+        const diffTime = now.getTime() - startDate.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24)); 
+        
+        periodsElapsed = Math.floor(diffDays / daysPerPeriod);
+        
+        const nextInstallmentNumber = Math.floor(paid) + 1;
+        // nextDue = startDate + nextInstallmentNumber * daysPerPeriod
+        nextDue = addDays(startDate, nextInstallmentNumber * daysPerPeriod);
+    }
+
+    const overdue = Math.max(0, periodsElapsed - paid);
 
     return {
         overdueInstallments: overdue,

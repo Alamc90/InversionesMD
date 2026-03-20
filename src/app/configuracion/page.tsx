@@ -476,6 +476,11 @@ export default function ConfigurationPage() {
                                                     <SelectContent>
                                                         <SelectItem value="ninguno">Ninguno</SelectItem>
                                                         <SelectItem value="domingo">Domingo</SelectItem>
+                                                        <SelectItem value="lunes">Lunes</SelectItem>
+                                                        <SelectItem value="martes">Martes</SelectItem>
+                                                        <SelectItem value="miercoles">Miércoles</SelectItem>
+                                                        <SelectItem value="jueves">Jueves</SelectItem>
+                                                        <SelectItem value="viernes">Viernes</SelectItem>
                                                         <SelectItem value="sabado">Sábado</SelectItem>
                                                     </SelectContent>
                                                 </Select>

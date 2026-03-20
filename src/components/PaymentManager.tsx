@@ -428,11 +428,11 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                         <span className="font-bold bg-yellow-400 text-black px-1 rounded inline-block">{details.plate}</span>
                                     </div>
                                     <div>
-                                        <span className="text-muted-foreground block text-xs">Modelo</span>
+                                        <span className="text-muted-foreground block text-xs">Marca/Línea</span>
                                         <span className="font-medium">{details.model}</span>
                                     </div>
                                     <div>
-                                        <span className="text-muted-foreground block text-xs">Año</span>
+                                        <span className="text-muted-foreground block text-xs">Modelo</span>
                                         <span className="font-medium">{details.year}</span>
                                     </div>
                                     <div>

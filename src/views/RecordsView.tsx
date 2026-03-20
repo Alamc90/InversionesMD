@@ -183,7 +183,7 @@ export const RecordsView = () => {
                             <Table className="min-w-[600px]">
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Modelo</TableHead>
+                                        <TableHead>Marca/Línea</TableHead>
                                         <TableHead>Placa</TableHead>
                                         <TableHead>Color</TableHead>
                                         <TableHead>Dueño</TableHead>
@@ -281,11 +281,11 @@ export const RecordsView = () => {
                         <form onSubmit={handleSaveVehicle} className="space-y-4">
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div className="space-y-2">
-                                    <Label>Modelo</Label>
+                                    <Label>Marca/Línea</Label>
                                     <Input value={editingVehicle.model || ''} onChange={e => setEditingVehicle({...editingVehicle, model: e.target.value})} required/>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>Año</Label>
+                                    <Label>Modelo</Label>
                                     <Input type="number" value={editingVehicle.year || ''} onChange={e => setEditingVehicle({...editingVehicle, year: Number(e.target.value)})} required/>
                                 </div>
                                 <div className="space-y-2">
