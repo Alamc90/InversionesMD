@@ -163,7 +163,7 @@ export const DataService = {
       .select(`
         *,
         customers ( first_name, last_name ),
-        installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency )
+        installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency, excluded_days )
       `);
     
     if (resolvedBusinessId) {

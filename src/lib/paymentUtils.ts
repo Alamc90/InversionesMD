@@ -26,7 +26,11 @@ export function calculateOverdueInfo(plan: any): { overdueInstallments: number, 
             'domingo': 0, 'lunes': 1, 'martes': 2, 'miercoles': 3, 
             'jueves': 4, 'viernes': 5, 'sabado': 6
         };
-        const excludedDays = (plan.excluded_days || []).map((d: string) => dayMap[d.toLowerCase()] ?? -1);
+        let rawExcluded = plan.excluded_days || [];
+        if (typeof rawExcluded === 'string') {
+            rawExcluded = rawExcluded.split(',').map((d: string) => d.trim()).filter((d: string) => d !== '');
+        }
+        const excludedDays = rawExcluded.map((d: string) => dayMap[d.toLowerCase()] ?? -1);
 
         // Calculate periods elapsed (valid days only)
         let currentDate = new Date(startDate);
