@@ -21,9 +21,10 @@ interface Props {
     vehicleId: number;
     isOpen: boolean;
     onClose: () => void;
+    onPaymentComplete?: (newProgress?: number) => void;
 }
 
-export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) => {
+export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose, onPaymentComplete }) => {
     const { hasPermission, business } = useAuth();
     const canAutoApprove = hasPermission('can_approve_payments');
     
@@ -128,7 +129,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const calculateOverdue = (plan: any) => {
         const info = calculateOverdueInfo(plan);
         setOverdueInfo({
-            overdueInstallments: Math.floor(info.overdueInstallments),
+            overdueInstallments: Number(info.overdueInstallments.toFixed(2)),
             nextDueDate: info.nextDueDate ? info.nextDueDate.toLocaleDateString() : ''
         });
     };
@@ -150,7 +151,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
     const payPendingInstallments = () => {
         const plans = Array.isArray(details?.installment_plans) ? details.installment_plans : (details?.installment_plans ? [details.installment_plans] : []);
         if (plans.length > 0) {
-            const amount = (Number(plans[0].installment_value) || 0) * Math.floor(overdueInfo.overdueInstallments);
+            const amount = (Number(plans[0].installment_value) || 0) * overdueInfo.overdueInstallments;
             if (amount > 0) {
                  setPaymentAmount(amount);
             } else {
@@ -221,28 +222,51 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
         if (plans.length === 0) return;
         
         setProcessing(true);
+        
+        let result: any;
         try {
             const finalNote = paymentType === 'down_payment' 
                 ? 'Abono a Cuota Inicial' + (paymentNote ? ` - ${paymentNote}` : '') 
                 : paymentNote;
 
-            const result = await DataService.registerPayment(plans[0].id, paymentAmount, finalNote, canAutoApprove);
-            
+            result = await DataService.registerPayment(plans[0].id, paymentAmount, finalNote, canAutoApprove);
+        } catch (error: any) {
+            toast.error(`Error al registrar pago: ${error.message || 'Error de servidor'}`);
+            console.error(error);
+            setProcessing(false);
+            return; // Detener flujo si falla el registro principal
+        }
+
+        // Si llegamos aquí, el registro principal fue exitoso
+        try {
             if (canAutoApprove) {
                 toast.success('Pago registrado y aprobado correctamente');
                 
                 // Record income in financial transactions
                 if (business?.id && result.payment) {
                     try {
-                        await FinancialService.recordPaymentIncome(
-                            business.id,
-                            paymentAmount,
-                            result.payment.id?.toString() || '',
-                            `Pago cuota - ${details.plate}`
-                        );
-                    } catch (e) {
+                        console.log("Recording income in financial_transactions...", result.payment);
+                        if (paymentType === 'down_payment') {
+                            await FinancialService.recordDownPaymentIncome(
+                                business.id,
+                                paymentAmount,
+                                details.plate
+                            );
+                        } else {
+                            await FinancialService.recordPaymentIncome(
+                                business.id,
+                                paymentAmount,
+                                result.payment.id?.toString() || '',
+                                `Pago cuota - ${details.plate}`
+                            );
+                        }
+                        console.log("Income recorded successfully in financial_transactions.");
+                    } catch (e: any) {
                         console.error('Error recording income:', e);
+                        toast.error('Error guardando en balance: ' + e.message);
                     }
+                } else {
+                    console.warn("Could not record income", business?.id, result.payment);
                 }
             } else {
                 toast.success('Pago registrado como PENDIENTE. Requiere aprobación de un administrador.');
@@ -252,12 +276,9 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
             setPaymentNote('');
             
             // Recalculate locally for immediate UI update on pending installments if needed
-            // But DataService now returns the new progress!
-            // @ts-ignore - DataService updated to return newProgress
             if (result && result.newProgress !== undefined && plans[0]) {
                 const updatedPlan = { ...plans[0], installments_paid: result.newProgress };
 
-                // Update details state correctly to reflect in UI immediately
                 let newPlans = Array.isArray(details.installment_plans) ? [...details.installment_plans] : [details.installment_plans];
                 if (Array.isArray(details.installment_plans)) {
                      newPlans[0] = updatedPlan;
@@ -268,20 +289,20 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                 const newDetails = { ...details, installment_plans: newPlans };
                 setDetails(newDetails);
                 
-                // Recalculate overdue based on updated plan
+                if (onPaymentComplete) {
+                    onPaymentComplete(result.newProgress);
+                }
+                
                 calculateOverdue(updatedPlan);
                  
-                // Only reload history to show the new payment, avoid reloading full details which might be stale
                 await loadHistory(plans[0]);
-
-                // If needed, we can trigger a full reload much later, but strictly speaking it's not necessary if we trust our local update
             } else {
-                 // Fallback if no specific progress returned
                  await loadData();
             }
-        } catch (error) {
-            toast.error('Error al registrar pago');
-            console.error(error);
+        } catch (error: any) {
+            console.error("Error actualizando vistas después del pago:", error);
+            // Ya no mostramos "Error al registrar pago" porque el registro fue exitoso
+            // Opcional: toast.warning('El pago se guardó pero hubo un error recargando los datos');
         } finally {
             setProcessing(false);
         }
@@ -531,7 +552,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                             <div className="text-center p-4 bg-secondary/10 rounded-lg">
                                 <p className="text-sm text-muted-foreground">Cuotas Pendientes</p>
                                 <p className={`text-4xl font-bold ${overdueInfo.overdueInstallments > 0 ? "text-yellow-500" : "text-green-500"}`}>
-                                    {Math.floor(overdueInfo.overdueInstallments)}
+                                    {overdueInfo.overdueInstallments}
                                 </p>
                             </div>
                             <div className="flex justify-between text-sm">
@@ -650,9 +671,9 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                                     <span className="text-xl font-bold">{formatCurrency(paymentAmount)}</span>
                                 </div>
 
-                                    <Button size="lg" className="w-full" onClick={handlePayment} disabled={paymentAmount <= 0}>
-                                        Confirmar Pago
-                                    </Button>
+                                <Button size="lg" className="w-full" onClick={handlePayment} disabled={paymentAmount <= 0 || processing}>
+                                    {processing ? 'Confirmando pago...' : 'Confirmar Pago'}
+                                </Button>
                             </CardContent>
                         </Card>
                     </div>
@@ -768,7 +789,7 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose }) 
                             <div className="flex justify-end gap-2 pt-4">
                                 <Button variant="outline" onClick={() => setIsConfirmOpen(false)} disabled={processing}>Cancelar</Button>
                                 <Button onClick={confirmPayment} disabled={processing}>
-                                    {processing ? 'Procesando...' : 'Aceptar Pago'}
+                                    {processing ? 'Confirmando pago...' : 'Confirmar Pago'}
                                 </Button>
                             </div>
                         </div>

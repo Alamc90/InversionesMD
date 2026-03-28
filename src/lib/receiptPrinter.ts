@@ -40,7 +40,7 @@ function buildReceiptData(props: PrintReceiptProps): ReceiptData {
       : installmentsInPayment.toFixed(1);
 
   const overdueInfo = calculateOverdueInfo(plan);
-  const overdueInstallments = Math.floor(overdueInfo.overdueInstallments);
+  const overdueInstallments = Number(overdueInfo.overdueInstallments.toFixed(2));
   const statusText =
     overdueInstallments > 0
       ? `${overdueInstallments} Cuota(s) Vencida(s)`
