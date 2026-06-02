@@ -108,7 +108,7 @@ async function withRetry<T>(
     throw lastError;
 }
 
-async function fetchMembership(userId: string): Promise<MembershipResult> {
+async function fetchMembership(user: User): Promise<MembershipResult> {
     const empty: MembershipResult = {
         business: null, membership: null,
         permissions: defaultPermissions, isAdmin: false, tablesNotReady: false,
@@ -118,12 +118,20 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
         // Check membership (with retry)
         // Optimizacion: Evitar JOIN implicito para reducir carga en RLS
         const { data: memberData, error: memberError } = await withRetry(async () => {
-            const result = await supabase
-                .from('business_members')
-                .select('*')
-                .eq('user_id', userId)
-                .limit(1)
-                .maybeSingle();
+            const { value: result, timedOut } = await withTimeout(
+                supabase
+                    .from('business_members')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .limit(1)
+                    .maybeSingle(),
+                2000,
+                { data: null, error: new Error('Supabase query timed out') } as any
+            );
+
+            if (timedOut) {
+                throw result.error;
+            }
 
             // Si la tabla no existe (42P01), es local sin migraciones
             if (result.error && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
@@ -176,26 +184,35 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
 
         // Check pending invitations
         try {
-            const { data: userData } = await supabase.auth.getUser();
-            const email = userData?.user?.email;
+            const email = user.email;
             if (email) {
-                const { data: invitation } = await supabase
-                    .from('business_invitations')
-                    .select('*')
-                    .eq('email', email)
-                    .eq('accepted', false)
-                    .maybeSingle();
+                const { value: invitationResult, timedOut: invTimedOut } = await withTimeout(
+                    supabase
+                        .from('business_invitations')
+                        .select('*')
+                        .eq('email', email)
+                        .eq('accepted', false)
+                        .maybeSingle(),
+                    2000,
+                    { data: null, error: new Error('Invitation query timed out') } as any
+                );
+
+                if (invTimedOut) {
+                    throw invitationResult.error;
+                }
+
+                const invitation = invitationResult.data;
 
                 if (invitation) {
-                    const displayName = userData.user?.user_metadata?.first_name
-                        ? `${userData.user.user_metadata.first_name} ${userData.user.user_metadata.last_name || ''}`.trim()
+                    const displayName = user.user_metadata?.first_name
+                        ? `${user.user_metadata.first_name} ${user.user_metadata.last_name || ''}`.trim()
                         : email;
 
                     const { data: newMember, error: insertError } = await supabase
                         .from('business_members')
                         .insert({
                             business_id: invitation.business_id,
-                            user_id: userId,
+                            user_id: user.id,
                             role: invitation.role,
                             display_name: displayName,
                             permissions: invitation.permissions,
@@ -206,7 +223,7 @@ async function fetchMembership(userId: string): Promise<MembershipResult> {
                     // 409 means Conflict (The member already exists due to a parallel race condition)
                     if (insertError && insertError.code === '23505') {
                         console.log('[AuthContext] Member already inserted. Retrying fetch...');
-                        return fetchMembership(userId); // Loop back once
+                        return fetchMembership(user); // Loop back once
                     }
 
                     if (!insertError && newMember) {
@@ -290,8 +307,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 
                 // Use timeout to prevent hanging on auth state changes
                 const { value: result, timedOut } = await withTimeout(
-                    fetchMembership(s.user.id),
-                    15000,
+                    fetchMembership(s.user),
+                    8000,
                     membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }
                 );
                 
@@ -302,12 +319,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     applyMembership(membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }, true);
                     
                     // If timed out, schedule a silent auto-retry in background
-                    const userId = s.user.id;
+                    const userObj = s.user;
                     setTimeout(async () => {
                         if (!isMounted) return;
                         console.log('[AuthContext] Auto-retrying membership fetch after timeout...');
                         try {
-                            const retryResult = await fetchMembership(userId);
+                            const retryResult = await fetchMembership(userObj);
                             if (isMounted) applyMembership(retryResult, false);
                         } catch (e) {
                             console.error('[AuthContext] Auto-retry failed:', e);
@@ -381,7 +398,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const refreshMembership = useCallback(async () => {
         const { data: { session: s } } = await supabase.auth.getSession();
         if (s?.user) {
-            const result = await fetchMembership(s.user.id);
+            const result = await fetchMembership(s.user);
             applyMembership(result);
         }
     }, []);

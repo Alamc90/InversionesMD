@@ -79,7 +79,7 @@ export const DataService = {
 
       const resolvedBusinessId = businessId || await this.getBusinessId();
       
-      // 1. Create Customer (and Guarantor info)
+      // 1. Create or Update Customer (manual upsert to avoid global UNIQUE conflicts across businesses)
       const customerPayload: any = {
             user_id: user.id,
             first_name: customer.first_name,
@@ -94,16 +94,43 @@ export const DataService = {
       };
       if (resolvedBusinessId) customerPayload.business_id = resolvedBusinessId;
 
-      const { data: customerData, error: customerError } = await supabase
-        .from('customers')
-        .upsert([customerPayload], { onConflict: 'cedula' })
-        .select()
-        .single();
+      // Check if customer already exists in THIS business by cedula
+      let customerData: any = null;
+      if (customer.cedula && resolvedBusinessId) {
+          const { data: existing } = await supabase
+              .from('customers')
+              .select('*')
+              .eq('cedula', customer.cedula)
+              .eq('business_id', resolvedBusinessId)
+              .maybeSingle();
+          
+          if (existing) {
+              // Update existing customer
+              const { data: updated, error: updateErr } = await supabase
+                  .from('customers')
+                  .update(customerPayload)
+                  .eq('id', existing.id)
+                  .select()
+                  .single();
+              if (updateErr) throw updateErr;
+              customerData = updated;
+          }
+      }
 
-      if (customerError) throw customerError;
+      if (!customerData) {
+          // Insert new customer
+          const { data: inserted, error: insertErr } = await supabase
+              .from('customers')
+              .insert([customerPayload])
+              .select()
+              .single();
+          if (insertErr) throw insertErr;
+          customerData = inserted;
+      }
+
       if (!customerData) throw new Error("Failed to create customer");
 
-      // 2. Create Vehicle linked to Customer
+      // 2. Create or Update Vehicle linked to Customer (same manual upsert approach)
       const vehiclePayload: any = {
             user_id: user.id,
             customer_id: customerData.id,
@@ -114,13 +141,37 @@ export const DataService = {
       };
       if (resolvedBusinessId) vehiclePayload.business_id = resolvedBusinessId;
 
-      const { data: vehicleData, error: vehicleError } = await supabase
-        .from('vehicles')
-        .upsert([vehiclePayload], { onConflict: 'plate' })
-        .select()
-        .single();
+      let vehicleData: any = null;
+      if (vehicle.plate && resolvedBusinessId) {
+          const { data: existing } = await supabase
+              .from('vehicles')
+              .select('*')
+              .eq('plate', vehicle.plate)
+              .eq('business_id', resolvedBusinessId)
+              .maybeSingle();
+          
+          if (existing) {
+              const { data: updated, error: updateErr } = await supabase
+                  .from('vehicles')
+                  .update(vehiclePayload)
+                  .eq('id', existing.id)
+                  .select()
+                  .single();
+              if (updateErr) throw updateErr;
+              vehicleData = updated;
+          }
+      }
 
-      if (vehicleError) throw vehicleError;
+      if (!vehicleData) {
+          const { data: inserted, error: insertErr } = await supabase
+              .from('vehicles')
+              .insert([vehiclePayload])
+              .select()
+              .single();
+          if (insertErr) throw insertErr;
+          vehicleData = inserted;
+      }
+
       if (!vehicleData) throw new Error("Failed to create vehicle");
 
       // 3. Create Installment Plan linked to Vehicle

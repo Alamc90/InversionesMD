@@ -10,8 +10,10 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
+import { useAuth } from '@/contexts/AuthContext';
 
 export const IssueBikeView: React.FC = () => {
+    const { business } = useAuth();
     const [step, setStep] = useState(1);
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [vehicle, setVehicle] = useState<Vehicle | null>(null);
@@ -28,7 +30,7 @@ export const IssueBikeView: React.FC = () => {
 
     const handlePlanSubmit = async (plan: PaymentPlanModel) => {
         if (customer && vehicle) {
-            const result = await DataService.createFullRecord(customer, vehicle, plan);
+            const result = await DataService.createFullRecord(customer, vehicle, plan, business?.id);
             if (result.success) {
                 toast.success('Moto entregada exitosamente!');
                 setStep(1); // Reset or redirect

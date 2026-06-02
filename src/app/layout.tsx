@@ -7,7 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "InversionesMD",
+  title: "Inversiones Manager",
   description: "Gestión de cuotas y vehículos",
   icons: {
     icon: "/icon.png",

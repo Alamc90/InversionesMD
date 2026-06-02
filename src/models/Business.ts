@@ -5,6 +5,7 @@ export interface Business {
     address?: string;
     phone?: string;
     logo_url?: string;
+    status?: number;
     created_by?: string;
     created_at?: string;
     updated_at?: string;

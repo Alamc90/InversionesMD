@@ -67,6 +67,18 @@ export const MotorcycleList: React.FC = () => {
             const plan = getPlan(vehicle) || {};
             return (Number(plan.total_installments) || 0) - (Number(plan.installments_paid) || 0);
         };
+
+        const getOverdue = (vehicle: any) => {
+            const plan = getPlan(vehicle);
+            if (!plan) return 0;
+            return calculateOverdueInfo(plan).overdueInstallments;
+        };
+
+        const getProgressPercent = (vehicle: any) => {
+            const plan = getPlan(vehicle);
+            if (!plan || !plan.total_installments) return 0;
+            return (Number(plan.installments_paid) || 0) / Number(plan.total_installments);
+        };
         
         const getStatusScore = (vehicle: any) => {
             const plan = getPlan(vehicle);
@@ -106,10 +118,16 @@ export const MotorcycleList: React.FC = () => {
             return (a.plate || '').localeCompare(b.plate || '');
         }
         if (sortBy === 'pending_asc') {
-            return getPending(a) - getPending(b);
+            return getOverdue(a) - getOverdue(b);
         }
         if (sortBy === 'pending_desc') {
-            return getPending(b) - getPending(a);
+            return getOverdue(b) - getOverdue(a);
+        }
+        if (sortBy === 'progress_asc') {
+            return getProgressPercent(a) - getProgressPercent(b);
+        }
+        if (sortBy === 'progress_desc') {
+            return getProgressPercent(b) - getProgressPercent(a);
         }
         // default recent
         return (b.id || 0) - (a.id || 0);
@@ -131,8 +149,10 @@ export const MotorcycleList: React.FC = () => {
                                 <SelectItem value="client_asc">Cliente (A-Z)</SelectItem>
                                 <SelectItem value="client_desc">Cliente (Z-A)</SelectItem>
                                 <SelectItem value="plate_asc">Placa (A-Z)</SelectItem>
-                                <SelectItem value="pending_asc">Menos cuotas pendientes</SelectItem>
-                                <SelectItem value="pending_desc">Más cuotas pendientes</SelectItem>
+                                <SelectItem value="pending_asc">Menos cuotas atrasadas (Al día primero)</SelectItem>
+                                <SelectItem value="pending_desc">Más cuotas atrasadas</SelectItem>
+                                <SelectItem value="progress_asc">Progreso de pago (Menor primero)</SelectItem>
+                                <SelectItem value="progress_desc">Progreso de pago (Mayor primero)</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>

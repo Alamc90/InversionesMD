@@ -107,10 +107,10 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
     useEffect(() => {
         if (!authLoading && !session) {
             router.replace('/login');
+        } else if (!authLoading && session && !business && !tablesNotReady && !connectionFailed) {
+            router.replace('/setup-negocio');
         }
-    }, [authLoading, session, router]);
-
-    // No automatic redirect to setup-negocio — handled inline below
+    }, [authLoading, session, business, tablesNotReady, connectionFailed, router]);
 
     const handleLogout = async () => {
         setMobileMenuOpen(false);
@@ -156,32 +156,23 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
         );
     }
 
-    // No business found (successful query, truly no business) — show retry
-    if (!business && !tablesNotReady) {
+    // Business suspended
+    if (business && business.status === 0) {
         return (
             <div className="flex items-center justify-center min-h-screen bg-background">
                 <Card className="max-w-md w-full mx-4 animate-fade-in">
                     <CardContent className="pt-6">
                         <div className="flex flex-col items-center gap-4 text-center">
-                            <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center">
-                                <WifiOff className="h-8 w-8 text-orange-500" />
+                            <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
+                                <LogOut className="h-8 w-8 text-red-500" />
                             </div>
                             <div>
-                                <h2 className="text-lg font-semibold mb-1">No se pudo cargar tu negocio</h2>
+                                <h2 className="text-lg font-semibold mb-1">Cuenta de negocio inactiva</h2>
                                 <p className="text-sm text-muted-foreground">
-                                    Puede ser un problema de conexión. Intenta de nuevo.
+                                    Tu negocio ha sido suspendido o se encuentra inactivo. Contacta al administrador del sistema.
                                 </p>
                             </div>
-                            <div className="flex gap-3 w-full">
-                                <Button className="flex-1" onClick={() => refreshMembership()} >
-                                    <RefreshCw className="h-4 w-4 mr-2" />
-                                    Reintentar
-                                </Button>
-                                <Button variant="outline" onClick={() => window.location.reload()}>
-                                    Recargar
-                                </Button>
-                            </div>
-                            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground">
+                            <Button variant="ghost" size="sm" onClick={handleLogout} className="text-muted-foreground mt-4">
                                 <LogOut className="h-4 w-4 mr-1" />
                                 Cerrar sesión
                             </Button>
@@ -190,6 +181,11 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
                 </Card>
             </div>
         );
+    }
+
+    // No business found (successful query, truly no business) — redirecting to setup-negocio
+    if (!business && !tablesNotReady) {
+        return <LoadingScreen message="Redirigiendo..." submessage="Preparando configuración" />;
     }
 
     const showApprovals = hasPermission('can_approve_payments');
@@ -221,7 +217,7 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
                                 className="h-8 w-8 object-contain rounded shrink-0"
                             />
                         )}
-                        <h1 className="text-lg md:text-xl font-bold truncate">{business?.name || 'InversionesMD'}</h1>
+                        <h1 className="text-lg md:text-xl font-bold truncate">{business?.name || 'Inversiones Manager'}</h1>
                         {membership && (
                             <span className={`text-xs px-2 py-0.5 rounded-full shrink-0 hidden sm:inline-block ${
                                 isAdmin ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'

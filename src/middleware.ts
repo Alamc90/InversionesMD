@@ -2,6 +2,20 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+    const { pathname } = request.nextUrl;
+
+    // 1. Permitir archivos estáticos e imágenes inmediatamente sin cargar Supabase
+    if (pathname.includes('.') || pathname.startsWith('/_next/')) {
+        return NextResponse.next();
+    }
+
+    // 2. Omitir verificación pesada para prefetchs de Next.js
+    const isPrefetch = request.headers.get("x-middleware-prefetch") === "1" ||
+                       request.headers.get("purpose") === "prefetch";
+    if (isPrefetch) {
+        return NextResponse.next();
+    }
+
     let response = NextResponse.next({
         request: {
             headers: request.headers,
@@ -48,11 +62,6 @@ export async function middleware(request: NextRequest) {
     const isPublicRoute = publicRoutes.some(route => 
         request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(`${route}/`)
     );
-
-    // Permitir archivos estáticos explícitamente por si el matcher falla
-    if (request.nextUrl.pathname.includes('.')) {
-        return response;
-    }
 
     // Redirigir a los no autenticados a /login si no están en una ruta autorizada
     if (!user && !isPublicRoute) {
