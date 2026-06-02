@@ -70,10 +70,10 @@ interface MembershipResult {
 
 // Wraps a promise with a timeout to prevent hanging forever
 // IMPORTANT: Cleans up the timer when the promise resolves to avoid orphaned warnings
-function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T): Promise<{ value: T; timedOut: boolean }> {
+function withTimeout<T>(promise: Promise<T> | PromiseLike<T>, ms: number, fallback: T): Promise<{ value: T; timedOut: boolean }> {
     let timer: ReturnType<typeof setTimeout>;
     return Promise.race([
-        promise.then(value => {
+        Promise.resolve(promise).then(value => {
             clearTimeout(timer);
             return { value, timedOut: false };
         }),
