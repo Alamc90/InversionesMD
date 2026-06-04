@@ -38,6 +38,3 @@ export function clearCorruptedAuthTokens(): void {
         }
     });
 }
-
-// Call on load
-clearCorruptedAuthTokens();
