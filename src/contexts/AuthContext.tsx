@@ -14,7 +14,7 @@ interface AuthContextType {
     loading: boolean;
     isAdmin: boolean;
     tablesNotReady: boolean;
-    connectionFailed: boolean;
+    loadingSlow: boolean;
     hasPermission: (permission: keyof UserPermissions) => boolean;
     refreshMembership: () => Promise<void>;
 }
@@ -50,7 +50,7 @@ const AuthContext = createContext<AuthContextType>({
     loading: true,
     isAdmin: false,
     tablesNotReady: false,
-    connectionFailed: false,
+    loadingSlow: false,
     hasPermission: () => false,
     refreshMembership: async () => {},
 });
@@ -65,28 +65,7 @@ interface MembershipResult {
     permissions: UserPermissions;
     isAdmin: boolean;
     tablesNotReady: boolean;
-    timedOut?: boolean;
 }
-
-// Wraps a promise with a timeout to prevent hanging forever
-// IMPORTANT: Cleans up the timer when the promise resolves to avoid orphaned warnings
-function withTimeout<T>(promise: Promise<T> | PromiseLike<T>, ms: number, fallback: T): Promise<{ value: T; timedOut: boolean }> {
-    let timer: ReturnType<typeof setTimeout>;
-    return Promise.race([
-        Promise.resolve(promise).then(value => {
-            clearTimeout(timer);
-            return { value, timedOut: false };
-        }),
-        new Promise<{ value: T; timedOut: boolean }>((resolve) => {
-            timer = setTimeout(() => {
-                console.warn(`[AuthContext] Operation timed out after ${ms}ms`);
-                resolve({ value: fallback, timedOut: true });
-            }, ms);
-        }),
-    ]);
-}
-
-// Helper removed: withRetry is no longer used
 
 async function fetchMembership(user: User): Promise<MembershipResult> {
     const empty: MembershipResult = {
@@ -95,8 +74,7 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
     };
 
     try {
-        // Check membership
-        // Optimizacion: Evitar JOIN implicito para reducir carga en RLS
+        // Check membership — single direct query, no timeouts
         const result = await supabase
             .from('business_members')
             .select('*')
@@ -225,23 +203,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [loading, setLoading] = useState(true);
     const [isAdmin, setIsAdmin] = useState(false);
     const [tablesNotReady, setTablesNotReady] = useState(false);
-    const [connectionFailed, setConnectionFailed] = useState(false);
-    const initDone = useRef(false);
+    const [loadingSlow, setLoadingSlow] = useState(false);
     const membershipCache = useRef<MembershipResult | null>(null);
 
-    const applyMembership = (result: MembershipResult, didTimeout: boolean = false) => {
+    const applyMembership = (result: MembershipResult) => {
         membershipCache.current = result;
         setBusiness(result.business);
         setMembership(result.membership);
         setPermissions(result.permissions);
         setIsAdmin(result.isAdmin);
         setTablesNotReady(result.tablesNotReady);
-        setConnectionFailed(didTimeout);
     };
 
     useEffect(() => {
         let isMounted = true;
-        // Safety net: always stop loading after max timeout
+        let slowTimer: ReturnType<typeof setTimeout>;
+
+        // Safety net: always stop loading after 30s absolute max
         const safetyTimeout = setTimeout(() => {
             if (isMounted) {
                 setLoading((current) => {
@@ -262,24 +240,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // Solo mostrar loader de pantalla completa si es forzado o si no hay datos previos
                 if (forceSetLoading && !membershipCache.current) {
                     setLoading(true);
+                    setLoadingSlow(false);
+                    // Si pasan 5s, indicar que está tardando más de lo esperado
+                    slowTimer = setTimeout(() => {
+                        if (isMounted) setLoadingSlow(true);
+                    }, 5000);
                 }
                 
-                // Use timeout to prevent hanging on auth state changes
-                const { value: result, timedOut } = await withTimeout(
-                    fetchMembership(s.user),
-                    15000,
-                    membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }
-                );
-                
-                if (isMounted && !timedOut) {
-                    applyMembership(result);
-                } else if (isMounted && timedOut) {
-                    console.error('[AuthContext] Operation timed out after 15000ms');
-                    // Try to apply whatever we have, or at least show connection failed
-                    applyMembership(membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }, true);
+                // Sin timeout — dejamos que la query corra hasta que responda
+                try {
+                    const result = await fetchMembership(s.user);
+                    if (isMounted) {
+                        applyMembership(result);
+                    }
+                } catch (error) {
+                    console.error('[AuthContext] fetchMembership error:', error);
+                    // On error, apply cache if available, otherwise empty state
+                    if (isMounted && membershipCache.current) {
+                        applyMembership(membershipCache.current);
+                    }
                 }
                 
-                if (isMounted) setLoading(false);
+                if (isMounted) {
+                    clearTimeout(slowTimer);
+                    setLoadingSlow(false);
+                    setLoading(false);
+                }
             } else {
                 membershipCache.current = null;
                 if (isMounted) {
@@ -337,6 +323,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return () => {
             isMounted = false;
             clearTimeout(safetyTimeout);
+            clearTimeout(slowTimer);
             subscription.unsubscribe();
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -358,7 +345,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return (
         <AuthContext.Provider value={{
             session, user, business, membership, permissions,
-            loading, isAdmin, tablesNotReady, connectionFailed,
+            loading, isAdmin, tablesNotReady, loadingSlow,
             hasPermission, refreshMembership,
         }}>
             {children}
