@@ -74,13 +74,52 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
     };
 
     try {
-        // Check membership — single direct query, no timeouts
-        const result = await supabase
-            .from('business_members')
-            .select('*')
-            .eq('user_id', user.id)
-            .limit(1)
-            .maybeSingle();
+        // Ejecutamos la consulta con un AbortController para romper deadlocks
+        let memberResult: any = null;
+        let lastError: any = null;
+
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => {
+                controller.abort(new Error('Timeout'));
+            }, 6000); // 6 segundos de límite duro por intento
+
+            try {
+                console.log(`[AuthContext] Fetching membership (Attempt ${attempt}/3)...`);
+                const result = await supabase
+                    .from('business_members')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .limit(1)
+                    .abortSignal(controller.signal)
+                    .maybeSingle();
+
+                clearTimeout(timeoutId);
+
+                // Si fue abortado a nivel de red, el mensaje suele decir "aborted"
+                if (result.error && result.error.message?.toLowerCase().includes('abort')) {
+                    throw result.error;
+                }
+
+                memberResult = result;
+                break; // Éxito, salir del loop
+            } catch (err: any) {
+                clearTimeout(timeoutId);
+                console.warn(`[AuthContext] fetchMembership attempt ${attempt} failed/timed out:`, err.message || err);
+                lastError = err;
+                
+                if (attempt === 3) break; // Si era el último, rendirse
+                // Esperar 1 segundo antes de intentar de nuevo
+                await new Promise(r => setTimeout(r, 1000));
+            }
+        }
+
+        if (!memberResult) {
+            console.error('[AuthContext] Todas las retries fallaron. Último error:', lastError);
+            return empty;
+        }
+
+        const result = memberResult;
 
         // Si la tabla no existe (42P01), es local sin migraciones
         if (result.error && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
@@ -127,12 +166,37 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
         try {
             const email = user.email;
             if (email) {
-                const invitationResult = await supabase
-                        .from('business_invitations')
-                        .select('*')
-                        .eq('email', email)
-                        .eq('accepted', false)
-                        .maybeSingle();
+                let invitationResult: any = null;
+
+                for (let attempt = 1; attempt <= 3; attempt++) {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(new Error('Timeout')), 6000);
+
+                    try {
+                        const result = await supabase
+                                .from('business_invitations')
+                                .select('*')
+                                .eq('email', email)
+                                .eq('accepted', false)
+                                .abortSignal(controller.signal)
+                                .maybeSingle();
+                        
+                        clearTimeout(timeoutId);
+
+                        if (result.error && result.error.message?.toLowerCase().includes('abort')) {
+                            throw result.error;
+                        }
+
+                        invitationResult = result;
+                        break;
+                    } catch (err: any) {
+                        clearTimeout(timeoutId);
+                        if (attempt === 3) break;
+                        await new Promise(r => setTimeout(r, 1000));
+                    }
+                }
+
+                if (!invitationResult) throw new Error('Invitations query failed after retries');
 
                 if (invitationResult.error) {
                     throw invitationResult.error;

@@ -70,12 +70,39 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
             }
         };
 
+        // Also listen for user interaction after potential idle
+        let idleTimer: NodeJS.Timeout | null = null;
+        let isIdle = false;
+
+        const resetIdle = () => {
+            if (isIdle) {
+                // User just interacted after being idle — check if we need to reload
+                isIdle = false;
+                if (!business && !tablesNotReady && session) {
+                    console.log('[MainLayout] User returned from idle with stale data, reloading...');
+                    window.location.reload();
+                    return;
+                }
+            }
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                isIdle = true;
+            }, 90000); // Mark as idle after 90s of no interaction
+        };
+
         document.addEventListener('visibilitychange', handleVisibility);
+        document.addEventListener('mousedown', resetIdle);
+        document.addEventListener('keydown', resetIdle);
+        document.addEventListener('touchstart', resetIdle);
 
         return () => {
             document.removeEventListener('visibilitychange', handleVisibility);
+            document.removeEventListener('mousedown', resetIdle);
+            document.removeEventListener('keydown', resetIdle);
+            document.removeEventListener('touchstart', resetIdle);
+            if (idleTimer) clearTimeout(idleTimer);
         };
-    }, []);
+    }, [session, business, tablesNotReady]);
 
     useEffect(() => {
         if (!authLoading && !session) {
