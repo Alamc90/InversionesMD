@@ -4,6 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { supabase, clearCorruptedAuthTokens } from '@/config/supabaseClient';
 import { Session, User } from '@supabase/supabase-js';
 import { Business, BusinessMember, UserPermissions, DEFAULT_ADMIN_PERMISSIONS } from '@/models/Business';
+import { AlertTriangle } from 'lucide-react';
 
 interface AuthContextType {
     session: Session | null;
@@ -15,8 +16,10 @@ interface AuthContextType {
     isAdmin: boolean;
     tablesNotReady: boolean;
     loadingSlow: boolean;
+    syncError: boolean;
     hasPermission: (permission: keyof UserPermissions) => boolean;
     refreshMembership: () => Promise<void>;
+    retryInit: () => void;
 }
 
 const defaultPermissions: UserPermissions = {
@@ -51,18 +54,18 @@ const AuthContext = createContext<AuthContextType>({
     isAdmin: false,
     tablesNotReady: false,
     loadingSlow: false,
+    syncError: false,
     hasPermission: () => false,
     refreshMembership: async () => { },
+    retryInit: () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
 
 // ---- Constants ----
-const AUTH_TIMEOUT_MS = 5000; // 5 seconds, matching Stockwear
-const RELOAD_FLAG_KEY = 'auth_deadlock_reload';
+const AUTH_TIMEOUT_MS = 5000; // 5 seconds
 
-// ---- Helper: Promise.race with timeout (Stockwear pattern) ----
-
+// ---- Helper: Promise.race with timeout ----
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
     let timeoutId: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<null>((resolve) => {
@@ -78,6 +81,28 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
     });
 }
 
+// ---- Helper: Get Session from localStorage synchronously (0ms, no locks) ----
+function getLocalSession(): Session | null {
+    if (typeof window === 'undefined') return null;
+    try {
+        const key = Object.keys(localStorage).find(
+            k => k.startsWith('sb-') && k.endsWith('-auth-token')
+        );
+        if (!key) return null;
+        
+        const data = localStorage.getItem(key);
+        if (!data) return null;
+        
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object' && parsed.access_token && parsed.user) {
+            return parsed as Session;
+        }
+    } catch (e) {
+        console.error('[AuthContext] Error parsing local session:', e);
+    }
+    return null;
+}
+
 // ---- Helper functions (outside component to avoid re-creation) ----
 
 interface MembershipResult {
@@ -88,10 +113,6 @@ interface MembershipResult {
     tablesNotReady: boolean;
 }
 
-/**
- * Simplified fetchMembership — no internal retries or AbortControllers.
- * The timeout control is handled at the caller level via Promise.race.
- */
 async function fetchMembership(user: User): Promise<MembershipResult> {
     const empty: MembershipResult = {
         business: null, membership: null,
@@ -121,7 +142,6 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
         if (result.error && result.error.code !== 'PGRST116') {
             console.error('Error fetching membership:', result.error);
 
-            // Check for refresh token errors (Stockwear pattern)
             if (result.error.message?.includes('Refresh Token')) {
                 console.warn('🧹 Corrupted refresh token detected in fetchMembership');
                 clearCorruptedAuthTokens();
@@ -135,7 +155,6 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
         if (memberData) {
             let biz: Business | null = null;
 
-            // Fetch business separately (RLS checks are safer this way)
             if (memberData.business_id) {
                 const { data: bizData } = await supabase
                     .from('businesses')
@@ -189,7 +208,6 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
                         .select('*, businesses(*)')
                         .single();
 
-                    // 23505 means unique constraint violation (member already exists)
                     if (insertError && insertError.code === '23505') {
                         console.log('[AuthContext] Member already inserted. Retrying fetch...');
                         return fetchMembership(user); // Loop back once
@@ -219,7 +237,6 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
 
         return empty;
     } catch (error) {
-        // Check for refresh token errors (Stockwear pattern)
         if (error instanceof Error && error.message?.includes('Refresh Token')) {
             console.warn('🧹 Corrupted refresh token detected in fetchMembership catch');
             clearCorruptedAuthTokens();
@@ -241,6 +258,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [isAdmin, setIsAdmin] = useState(false);
     const [tablesNotReady, setTablesNotReady] = useState(false);
     const [loadingSlow, setLoadingSlow] = useState(false);
+    const [syncError, setSyncError] = useState(false);
+    const [retryCount, setRetryCount] = useState(0);
+    
     const membershipCache = useRef<MembershipResult | null>(null);
     const initDone = useRef(false);
 
@@ -253,15 +273,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setTablesNotReady(result.tablesNotReady);
     }, []);
 
-    // ---- Mount-based initialization (Stockwear pattern) ----
-    // Instead of relying on onAuthStateChange for the initial load,
-    // we proactively fetch the session on mount and wrap it in a timeout.
+    // ---- Mount-based initialization (v7) ----
+    // Completely bypass getSession() if localStorage token is present to avoid Web Locks deadlock.
+    // No window.location.reload() loops. Uses syncError fallback UI instead.
     useEffect(() => {
         let isMounted = true;
         let slowTimer: ReturnType<typeof setTimeout>;
 
         const initialize = async () => {
-            console.log('[AuthContext] Initializing (mount-based)...');
+            console.log(`[AuthContext] Initializing (mount-based, retry: ${retryCount})...`);
+            setSyncError(false);
 
             // Show slow loading indicator after 3 seconds
             slowTimer = setTimeout(() => {
@@ -269,26 +290,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }, 3000);
 
             try {
-                // Step 1: Get session with timeout (Stockwear pattern)
-                const sessionResult = await withTimeout(
-                    supabase.auth.getSession(),
-                    AUTH_TIMEOUT_MS,
-                    'getSession'
-                );
+                // Step 1: Synchronous Session Read (0ms, 100% immune to locks)
+                let currentSession = getLocalSession();
+
+                if (currentSession) {
+                    console.log('[AuthContext] Found session in localStorage synchronously');
+                } else {
+                    console.log('[AuthContext] No session in localStorage, using getSession with 3s fallback...');
+                    // Fallback to getSession for first-time loads / cookie-only cases
+                    const sessionResult = await withTimeout(
+                        supabase.auth.getSession(),
+                        3000,
+                        'getSession fallback'
+                    );
+                    currentSession = sessionResult?.data?.session || null;
+                }
 
                 if (!isMounted) return;
 
-                // Timeout case: sessionResult is null
-                if (!sessionResult) {
-                    console.warn('[AuthContext] getSession timed out — possible Supabase deadlock');
-                    handleDeadlockRecovery();
-                    return;
-                }
-
-                const currentSession = sessionResult.data?.session;
-
                 if (!currentSession) {
-                    // No session = not logged in
                     console.log('[AuthContext] No session found');
                     if (isMounted) {
                         setSession(null);
@@ -302,13 +322,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     return;
                 }
 
-                // We have a session
+                // We have a session, apply it immediately
                 if (isMounted) {
                     setSession(currentSession);
                     setUser(currentSession.user);
                 }
 
-                // Step 2: Fetch membership with timeout (Stockwear pattern)
+                // Step 2: Fetch membership details non-blocking (with 5s timeout)
+                console.log('[AuthContext] Fetching membership details...');
                 const membershipResult = await withTimeout(
                     fetchMembership(currentSession.user),
                     AUTH_TIMEOUT_MS,
@@ -318,72 +339,34 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (!isMounted) return;
 
                 if (!membershipResult) {
-                    console.warn('[AuthContext] fetchMembership timed out');
-                    handleDeadlockRecovery();
-                    return;
+                    console.warn('[AuthContext] fetchMembership timed out or failed. Displaying sync error recovery UI.');
+                    setSyncError(true);
+                } else {
+                    applyMembership(membershipResult);
                 }
-
-                applyMembership(membershipResult);
 
             } catch (error) {
                 console.error('[AuthContext] Initialization error:', error);
-
                 if (error instanceof Error && error.message?.includes('Refresh Token')) {
-                    console.warn('🧹 Corrupted refresh token detected during init');
                     clearCorruptedAuthTokens();
                 }
+                setSyncError(true);
             } finally {
                 if (isMounted) {
                     clearTimeout(slowTimer);
                     setLoadingSlow(false);
                     setLoading(false);
                     initDone.current = true;
-                    // Clear the reload flag on successful initialization
-                    if (typeof window !== 'undefined') {
-                        sessionStorage.removeItem(RELOAD_FLAG_KEY);
-                    }
                 }
             }
         };
 
-        /**
-         * Deadlock recovery: if the Supabase client is stuck (internal lock),
-         * attempt a single hard page reload. This historically breaks the deadlock.
-         * A sessionStorage flag prevents infinite reload loops.
-         */
-        const handleDeadlockRecovery = () => {
-            if (typeof window === 'undefined' || !isMounted) return;
-
-            const alreadyReloaded = sessionStorage.getItem(RELOAD_FLAG_KEY);
-            if (alreadyReloaded) {
-                // Already tried reloading once — give up and show the app as logged out
-                console.warn('[AuthContext] Deadlock persists after reload. Falling back to logged-out state.');
-                sessionStorage.removeItem(RELOAD_FLAG_KEY);
-                setSession(null);
-                setUser(null);
-                setBusiness(null);
-                setMembership(null);
-                setPermissions(defaultPermissions);
-                setIsAdmin(false);
-                setLoading(false);
-                return;
-            }
-
-            console.log('[AuthContext] Attempting deadlock recovery via page reload...');
-            sessionStorage.setItem(RELOAD_FLAG_KEY, '1');
-            clearCorruptedAuthTokens();
-            window.location.reload();
-        };
-
         initialize();
 
-        // ---- Passive onAuthStateChange listener (Stockwear pattern) ----
-        // This listener does NOT trigger the initial load. It only reacts to
-        // subsequent auth events like sign-out or token refresh.
+        // ---- Passive onAuthStateChange listener ----
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
             if (!isMounted) return;
 
-            // Ignore the INITIAL_SESSION event — we handle it ourselves above
             if (event === 'INITIAL_SESSION') return;
 
             if (event === 'SIGNED_OUT') {
@@ -395,26 +378,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setMembership(null);
                 setPermissions(defaultPermissions);
                 setIsAdmin(false);
+                setSyncError(false);
                 setLoading(false);
                 return;
             }
 
             if (event === 'TOKEN_REFRESHED' && s) {
-                // Just update the session/user objects in memory, don't re-fetch membership
                 setSession(s);
                 setUser(s.user);
                 return;
             }
 
             if (event === 'SIGNED_IN' && s) {
-                // If the cache already has this user's data, just update session
                 if (membershipCache.current?.membership?.user_id === s.user.id) {
                     setSession(s);
                     setUser(s.user);
                     return;
                 }
 
-                // New sign-in (different user or first time) — re-fetch membership
                 setSession(s);
                 setUser(s.user);
                 try {
@@ -425,9 +406,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     );
                     if (isMounted && result) {
                         applyMembership(result);
+                    } else if (isMounted && !result) {
+                        setSyncError(true);
                     }
                 } catch (error) {
                     console.error('[AuthContext] Error fetching membership on SIGNED_IN:', error);
+                    if (isMounted) setSyncError(true);
                 }
                 if (isMounted) setLoading(false);
             }
@@ -439,36 +423,108 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             subscription.unsubscribe();
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [retryCount]);
 
     const refreshMembership = useCallback(async () => {
-        const sessionResult = await withTimeout(
-            supabase.auth.getSession(),
-            AUTH_TIMEOUT_MS,
-            'refreshMembership.getSession'
-        );
-        if (sessionResult?.data?.session?.user) {
+        let currentSession = getLocalSession();
+        if (!currentSession) {
+            const sessionResult = await withTimeout(
+                supabase.auth.getSession(),
+                AUTH_TIMEOUT_MS,
+                'refreshMembership.getSession'
+            );
+            currentSession = sessionResult?.data?.session || null;
+        }
+
+        if (currentSession?.user) {
             const result = await withTimeout(
-                fetchMembership(sessionResult.data.session.user),
+                fetchMembership(currentSession.user),
                 AUTH_TIMEOUT_MS,
                 'refreshMembership.fetchMembership'
             );
             if (result) {
                 applyMembership(result);
+                setSyncError(false);
             }
         }
     }, [applyMembership]);
+
+    const retryInit = useCallback(() => {
+        setLoading(true);
+        setSyncError(false);
+        setRetryCount(prev => prev + 1);
+    }, []);
 
     const hasPermission = useCallback((permission: keyof UserPermissions): boolean => {
         if (isAdmin || tablesNotReady) return true;
         return permissions[permission] === true;
     }, [permissions, isAdmin, tablesNotReady]);
 
+    const handleLogout = async () => {
+        try {
+            console.log('[AuthContext] Manual logout from sync error recovery');
+            clearCorruptedAuthTokens();
+            if (typeof window !== 'undefined') {
+                Object.keys(localStorage).forEach(key => {
+                    if (key.startsWith('sb-') && key.includes('-auth-token')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+            }
+            await supabase.auth.signOut();
+        } catch (e) {
+            console.warn('[AuthContext] Error in signOut:', e);
+        } finally {
+            setSession(null);
+            setUser(null);
+            setBusiness(null);
+            setMembership(null);
+            setPermissions(defaultPermissions);
+            setIsAdmin(false);
+            setSyncError(false);
+            setLoading(false);
+            if (typeof window !== 'undefined') {
+                window.location.href = '/login';
+            }
+        }
+    };
+
+    // ---- Render Sync Error Recovery UI if deadlocked ----
+    if (syncError) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 p-4 font-sans">
+                <div className="max-w-md w-full bg-white rounded-xl shadow-lg border border-slate-100 p-8 text-center animate-in fade-in zoom-in-95 duration-300">
+                    <div className="mx-auto mb-5 w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-600">
+                        <AlertTriangle className="h-8 w-8" />
+                    </div>
+                    <h3 className="text-xl font-semibold text-slate-900 mb-3">Error de Conexión</h3>
+                    <p className="text-slate-600 mb-8 leading-relaxed">
+                        No pudimos sincronizar los datos de tu sesión con la base de datos. Esto suele deberse a un problema temporal de conexión.
+                    </p>
+                    <div className="flex flex-col space-y-3">
+                        <button 
+                            onClick={retryInit} 
+                            className="w-full bg-slate-900 text-white py-3 px-4 rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
+                        >
+                            Reintentar conexión
+                        </button>
+                        <button 
+                            onClick={handleLogout} 
+                            className="w-full border border-slate-200 text-slate-700 py-3 px-4 rounded-lg font-medium hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                        >
+                            Cerrar Sesión
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <AuthContext.Provider value={{
             session, user, business, membership, permissions,
-            loading, isAdmin, tablesNotReady, loadingSlow,
-            hasPermission, refreshMembership,
+            loading, isAdmin, tablesNotReady, loadingSlow, syncError,
+            hasPermission, refreshMembership, retryInit,
         }}>
             {children}
         </AuthContext.Provider>
