@@ -261,6 +261,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [syncError, setSyncError] = useState(false);
     const [retryCount, setRetryCount] = useState(0);
     
+    const autoRetryCount = useRef(0);
     const membershipCache = useRef<MembershipResult | null>(null);
     const initDone = useRef(false);
 
@@ -283,6 +284,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const initialize = async () => {
             console.log(`[AuthContext] Initializing (mount-based, retry: ${retryCount})...`);
             setSyncError(false);
+            let willRetry = false;
 
             // Show slow loading indicator after 3 seconds
             slowTimer = setTimeout(() => {
@@ -339,8 +341,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (!isMounted) return;
 
                 if (!membershipResult) {
-                    console.warn('[AuthContext] fetchMembership timed out or failed. Displaying sync error recovery UI.');
-                    setSyncError(true);
+                    console.warn('[AuthContext] fetchMembership timed out or failed.');
+                    if (autoRetryCount.current < 2) {
+                        autoRetryCount.current += 1;
+                        console.log(`[AuthContext] Auto-retrying initialization... (${autoRetryCount.current}/2)`);
+                        willRetry = true;
+                        setTimeout(() => {
+                            if (isMounted) setRetryCount(prev => prev + 1);
+                        }, 500);
+                    } else {
+                        console.log('[AuthContext] Max auto-retries reached. Displaying sync error recovery UI.');
+                        setSyncError(true);
+                    }
                 } else {
                     applyMembership(membershipResult);
                 }
@@ -350,13 +362,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 if (error instanceof Error && error.message?.includes('Refresh Token')) {
                     clearCorruptedAuthTokens();
                 }
-                setSyncError(true);
+                if (autoRetryCount.current < 2) {
+                    autoRetryCount.current += 1;
+                    console.log(`[AuthContext] Auto-retrying after error... (${autoRetryCount.current}/2)`);
+                    willRetry = true;
+                    setTimeout(() => {
+                        if (isMounted) setRetryCount(prev => prev + 1);
+                    }, 500);
+                } else {
+                    setSyncError(true);
+                }
             } finally {
                 if (isMounted) {
                     clearTimeout(slowTimer);
-                    setLoadingSlow(false);
-                    setLoading(false);
-                    initDone.current = true;
+                    if (!willRetry) {
+                        setLoadingSlow(false);
+                        setLoading(false);
+                        initDone.current = true;
+                    }
                 }
             }
         };
@@ -406,14 +429,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     );
                     if (isMounted && result) {
                         applyMembership(result);
+                        setLoading(false);
                     } else if (isMounted && !result) {
-                        setSyncError(true);
+                        if (autoRetryCount.current < 2) {
+                            autoRetryCount.current += 1;
+                            setTimeout(() => {
+                                if (isMounted) {
+                                    setLoading(true);
+                                    setRetryCount(prev => prev + 1);
+                                }
+                            }, 500);
+                        } else {
+                            setSyncError(true);
+                            setLoading(false);
+                        }
                     }
                 } catch (error) {
                     console.error('[AuthContext] Error fetching membership on SIGNED_IN:', error);
-                    if (isMounted) setSyncError(true);
+                    if (isMounted) {
+                        if (autoRetryCount.current < 2) {
+                            autoRetryCount.current += 1;
+                            setTimeout(() => {
+                                if (isMounted) {
+                                    setLoading(true);
+                                    setRetryCount(prev => prev + 1);
+                                }
+                            }, 500);
+                        } else {
+                            setSyncError(true);
+                            setLoading(false);
+                        }
+                    }
                 }
-                if (isMounted) setLoading(false);
             }
         });
 
@@ -452,6 +499,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const retryInit = useCallback(() => {
         setLoading(true);
         setSyncError(false);
+        autoRetryCount.current = 0; // reset automatic retries
         setRetryCount(prev => prev + 1);
     }, []);
 
