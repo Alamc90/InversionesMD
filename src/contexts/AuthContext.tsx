@@ -269,6 +269,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [tablesNotReady, setTablesNotReady] = useState(false);
     const [loadingSlow, setLoadingSlow] = useState(false);
     const membershipCache = useRef<MembershipResult | null>(null);
+    const activeCheckRef = useRef<Promise<void> | null>(null);
 
     const applyMembership = (result: MembershipResult) => {
         membershipCache.current = result;
@@ -295,7 +296,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
         }, 30000);
 
-        const checkAuth = async (s: Session | null, forceSetLoading: boolean = true) => {
+        const internalCheckAuth = async (s: Session | null, forceSetLoading: boolean) => {
             if (!isMounted) return;
             setSession(s);
             setUser(s?.user ?? null);
@@ -340,32 +341,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     setLoading(false);
                 }
             }
-            if (isMounted) clearTimeout(safetyTimeout);
         };
 
-        const initSession = async () => {
+        const checkAuth = async (s: Session | null, forceSetLoading: boolean = true) => {
+            // Wait for any previous checkAuth to finish before starting a new one
+            // This prevents concurrent membership fetches if multiple auth events fire quickly
+            while (activeCheckRef.current) {
+                await activeCheckRef.current;
+            }
+
+            const checkPromise = internalCheckAuth(s, forceSetLoading);
+            activeCheckRef.current = checkPromise;
+            
             try {
-                const { data: { session: s } } = await supabase.auth.getSession();
-                await checkAuth(s, true);
-            } catch (error) {
-                console.error('[AuthContext] init error:', error);
-                if (isMounted) setLoading(false);
+                await checkPromise;
+            } finally {
+                // Remove the lock once done, but only if it's our promise
+                if (activeCheckRef.current === checkPromise) {
+                    activeCheckRef.current = null;
+                }
+                if (isMounted) clearTimeout(safetyTimeout);
             }
         };
-
-        let initSessionTriggered = false;
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
             if (!isMounted) return;
-            
-            // Allow manual sync logic to happen first before processing events
-            if (_event === 'INITIAL_SESSION') {
-                if (!initSessionTriggered) {
-                    initSessionTriggered = true;
-                    initSession();
-                }
-                return;
-            }
             
             // Si ya tenemos en caché la información de membresía y el id de usuario coincide,
             // simplemente actualizamos la sesión pero omitimos la recarga completa para evitar loops de UI
@@ -375,14 +375,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 return;
             }
             
-            await checkAuth(s, false); // For external state changes avoid blasting UI loader
+            // Forzamos el loading de la UI solo en el inicio (si no hay cache), los demás eventos son silenciosos
+            await checkAuth(s, _event === 'INITIAL_SESSION'); 
         });
-
-        // Fail-safe init call in case INITIAL_SESSION event bug happens in Supabase
-        if (!initSessionTriggered) {
-             initSessionTriggered = true;
-             initSession();
-        }
 
         return () => {
             isMounted = false;
