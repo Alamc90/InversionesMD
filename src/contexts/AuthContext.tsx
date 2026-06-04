@@ -52,7 +52,7 @@ const AuthContext = createContext<AuthContextType>({
     tablesNotReady: false,
     loadingSlow: false,
     hasPermission: () => false,
-    refreshMembership: async () => {},
+    refreshMembership: async () => { },
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -107,7 +107,7 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
                 clearTimeout(timeoutId);
                 console.warn(`[AuthContext] fetchMembership attempt ${attempt} failed/timed out:`, err.message || err);
                 lastError = err;
-                
+
                 if (attempt === 3) break; // Si era el último, rendirse
                 // Esperar 1 segundo antes de intentar de nuevo
                 await new Promise(r => setTimeout(r, 1000));
@@ -141,7 +141,7 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
 
         if (memberData) {
             let biz: Business | null = null;
-            
+
             // Fetch business separately (RLS checks are safer this way)
             if (memberData.business_id) {
                 const { data: bizData } = await supabase
@@ -174,13 +174,13 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
 
                     try {
                         const result = await supabase
-                                .from('business_invitations')
-                                .select('*')
-                                .eq('email', email)
-                                .eq('accepted', false)
-                                .abortSignal(controller.signal)
-                                .maybeSingle();
-                        
+                            .from('business_invitations')
+                            .select('*')
+                            .eq('email', email)
+                            .eq('accepted', false)
+                            .abortSignal(controller.signal)
+                            .maybeSingle();
+
                         clearTimeout(timeoutId);
 
                         if (result.error && result.error.message?.toLowerCase().includes('abort')) {
@@ -311,7 +311,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         if (isMounted) setLoadingSlow(true);
                     }, 5000);
                 }
-                
+
                 // Sin timeout — dejamos que la query corra hasta que responda
                 try {
                     const result = await fetchMembership(s.user);
@@ -325,7 +325,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         applyMembership(membershipCache.current);
                     }
                 }
-                
+
                 if (isMounted) {
                     clearTimeout(slowTimer);
                     setLoadingSlow(false);
@@ -352,7 +352,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
             const checkPromise = internalCheckAuth(s, forceSetLoading);
             activeCheckRef.current = checkPromise;
-            
+
             try {
                 await checkPromise;
             } finally {
@@ -366,7 +366,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
             if (!isMounted) return;
-            
+
             // Si ya tenemos en caché la información de membresía y el id de usuario coincide,
             // simplemente actualizamos la sesión pero omitimos la recarga completa para evitar loops de UI
             if (s?.user && membershipCache.current?.membership?.user_id === s.user.id) {
@@ -374,9 +374,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setUser(s.user);
                 return;
             }
-            
+
             // Forzamos el loading de la UI solo en el inicio (si no hay cache), los demás eventos son silenciosos
-            await checkAuth(s, _event === 'INITIAL_SESSION'); 
+            await checkAuth(s, _event === 'INITIAL_SESSION');
         });
 
         return () => {
@@ -385,7 +385,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             clearTimeout(slowTimer);
             subscription.unsubscribe();
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     const refreshMembership = useCallback(async () => {
