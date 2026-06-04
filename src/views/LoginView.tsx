@@ -44,7 +44,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, onSignUpSu
         setLoading(true);
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/update-password` : undefined,
+                redirectTo: typeof window !== 'undefined' ? `${window.location.origin}/auth/callback?next=/update-password` : undefined,
             });
             if (error) throw error;
             toast.success('Se ha enviado un correo de recuperación');

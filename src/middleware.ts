@@ -56,22 +56,27 @@ export async function middleware(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser();
 
-    // Rutas públicas que no requieren autenticación
-    const publicRoutes = ["/login", "/registro", "/api/invite", "/update-password"];
-    // Verificar si es exactamente la ruta de login o empieza por las otras
+    // Rutas exclusivas de autenticación (solo para usuarios NO logueados)
+    const authRoutes = ["/login", "/registro"];
+    // Rutas públicas que no requieren autenticación (pero un usuario logueado puede acceder, ej: cambiar contraseña)
+    const publicRoutes = ["/api/invite", "/update-password", "/auth/callback"];
+
+    const isAuthRoute = authRoutes.some(route => 
+        request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(`${route}/`)
+    );
     const isPublicRoute = publicRoutes.some(route => 
         request.nextUrl.pathname === route || request.nextUrl.pathname.startsWith(`${route}/`)
     );
 
-    // Redirigir a los no autenticados a /login si no están en una ruta autorizada
-    if (!user && !isPublicRoute) {
+    // Redirigir a los no autenticados a /login si no están en una ruta autorizada o pública
+    if (!user && !isAuthRoute && !isPublicRoute) {
         const url = request.nextUrl.clone();
         url.pathname = "/login";
         return NextResponse.redirect(url);
     }
 
     // Redirigir a usuarios logueados que intentan acceder a login/registro/raíz
-    if (user && (isPublicRoute || request.nextUrl.pathname === "/") && !request.nextUrl.pathname.startsWith('/api')) {
+    if (user && (isAuthRoute || request.nextUrl.pathname === "/") && !request.nextUrl.pathname.startsWith('/api')) {
         const url = request.nextUrl.clone();
         url.pathname = "/dashboard";
         return NextResponse.redirect(url);

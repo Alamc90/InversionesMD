@@ -86,27 +86,7 @@ function withTimeout<T>(promise: Promise<T> | PromiseLike<T>, ms: number, fallba
     ]);
 }
 
-// Retry a function with exponential backoff
-async function withRetry<T>(
-    fn: () => Promise<T>,
-    maxRetries: number = 2,
-    baseDelay: number = 1000
-): Promise<T> {
-    let lastError: any;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            lastError = error;
-            if (attempt < maxRetries) {
-                const delay = baseDelay * Math.pow(2, attempt);
-                console.warn(`[AuthContext] Attempt ${attempt + 1} failed, retrying in ${delay}ms...`);
-                await new Promise(r => setTimeout(r, delay));
-            }
-        }
-    }
-    throw lastError;
-}
+// Helper removed: withRetry is no longer used
 
 async function fetchMembership(user: User): Promise<MembershipResult> {
     const empty: MembershipResult = {
@@ -115,37 +95,17 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
     };
 
     try {
-        // Check membership (with retry)
+        // Check membership
         // Optimizacion: Evitar JOIN implicito para reducir carga en RLS
-        const { data: memberData, error: memberError } = await withRetry(async () => {
-            const { value: result, timedOut } = await withTimeout(
-                supabase
-                    .from('business_members')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .limit(1)
-                    .maybeSingle(),
-                2000,
-                { data: null, error: new Error('Supabase query timed out') } as any
-            );
+        const result = await supabase
+            .from('business_members')
+            .select('*')
+            .eq('user_id', user.id)
+            .limit(1)
+            .maybeSingle();
 
-            if (timedOut) {
-                throw result.error;
-            }
-
-            // Si la tabla no existe (42P01), es local sin migraciones
-            if (result.error && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
-                return { data: null, error: { ...result.error, isMissingTable: true } };
-            }
-
-            // Only retry on network-level errors, not on Supabase/RLS errors
-            if (result.error && !result.error.code) {
-                throw result.error;
-            }
-            return result;
-        }, 2, 1000);
-
-        if (memberError && (memberError as any).isMissingTable) {
+        // Si la tabla no existe (42P01), es local sin migraciones
+        if (result.error && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
             return {
                 business: { name: 'InversionesMD' } as Business,
                 membership: null,
@@ -155,9 +115,12 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
             };
         }
 
-        if (memberError && memberError.code !== 'PGRST116') {
-            console.error('Error fetching membership:', memberError);
+        if (result.error && result.error.code !== 'PGRST116') {
+            console.error('Error fetching membership:', result.error);
+            throw result.error;
         }
+
+        const memberData = result.data;
 
         if (memberData) {
             let biz: Business | null = null;
@@ -186,18 +149,14 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
         try {
             const email = user.email;
             if (email) {
-                const { value: invitationResult, timedOut: invTimedOut } = await withTimeout(
-                    supabase
+                const invitationResult = await supabase
                         .from('business_invitations')
                         .select('*')
                         .eq('email', email)
                         .eq('accepted', false)
-                        .maybeSingle(),
-                    2000,
-                    { data: null, error: new Error('Invitation query timed out') } as any
-                );
+                        .maybeSingle();
 
-                if (invTimedOut) {
+                if (invitationResult.error) {
                     throw invitationResult.error;
                 }
 
@@ -308,28 +267,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // Use timeout to prevent hanging on auth state changes
                 const { value: result, timedOut } = await withTimeout(
                     fetchMembership(s.user),
-                    8000,
+                    15000,
                     membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }
                 );
                 
                 if (isMounted && !timedOut) {
                     applyMembership(result);
                 } else if (isMounted && timedOut) {
+                    console.error('[AuthContext] Operation timed out after 15000ms');
                     // Try to apply whatever we have, or at least show connection failed
                     applyMembership(membershipCache.current || { business: null, membership: null, permissions: defaultPermissions, isAdmin: false, tablesNotReady: false }, true);
-                    
-                    // If timed out, schedule a silent auto-retry in background
-                    const userObj = s.user;
-                    setTimeout(async () => {
-                        if (!isMounted) return;
-                        console.log('[AuthContext] Auto-retrying membership fetch after timeout...');
-                        try {
-                            const retryResult = await fetchMembership(userObj);
-                            if (isMounted) applyMembership(retryResult, false);
-                        } catch (e) {
-                            console.error('[AuthContext] Auto-retry failed:', e);
-                        }
-                    }, 3000);
                 }
                 
                 if (isMounted) setLoading(false);
