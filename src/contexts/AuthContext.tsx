@@ -252,7 +252,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         slowTimer = setTimeout(() => {
             if (isMounted) setLoadingSlow(true);
-        }, 3000);
+        }, 5000);
 
         // Fail-safe if Supabase events totally hang or fetch fails
         const triggerFailureRecovery = () => {
@@ -283,7 +283,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // We only care about initial load or active sign-ins for membership fetching
             if (event === 'INITIAL_SESSION' || event === 'SIGNED_IN') {
                 console.log(`[AuthContext] Event received: ${event}`);
-                
+
                 if (!s || !s.user) {
                     console.log('[AuthContext] No session found on event.');
                     setSession(null);
@@ -315,14 +315,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 // New fetch needed
                 setSession(s);
                 setUser(s.user);
-                
+
                 try {
                     const result = await withTimeout(
                         fetchMembership(s.user),
                         AUTH_TIMEOUT_MS,
                         `fetchMembership (${event})`
                     );
-                    
+
                     if (!isMounted) return;
 
                     if (result) {
@@ -391,7 +391,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 setSyncError(false);
             }
         } else {
-             // Fallback if session is somehow missing but they try to refresh
+            // Fallback if session is somehow missing but they try to refresh
             const sessionResult = await withTimeout(
                 supabase.auth.getSession(),
                 AUTH_TIMEOUT_MS,
@@ -464,14 +464,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                         No pudimos sincronizar los datos de tu sesión con la base de datos. Esto suele deberse a un problema temporal de conexión.
                     </p>
                     <div className="flex flex-col space-y-3">
-                        <button 
-                            onClick={retryInit} 
+                        <button
+                            onClick={retryInit}
                             className="w-full bg-slate-900 text-white py-3 px-4 rounded-lg font-medium hover:bg-slate-800 transition-colors shadow-sm"
                         >
                             Reintentar conexión
                         </button>
-                        <button 
-                            onClick={handleLogout} 
+                        <button
+                            onClick={handleLogout}
                             className="w-full border border-slate-200 text-slate-700 py-3 px-4 rounded-lg font-medium hover:bg-slate-50 hover:text-slate-900 transition-colors"
                         >
                             Cerrar Sesión
