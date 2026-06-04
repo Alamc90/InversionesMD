@@ -13,18 +13,27 @@ export const supabase = createBrowserClient(supabaseUrl, supabaseKey, {
 
 /**
  * Clear legacy/corrupted auth tokens from localStorage.
+ * Matches Stockwear's exhaustive cleanup pattern.
  */
 export function clearCorruptedAuthTokens(): void {
     if (typeof window === 'undefined') return;
     
     const keysToCheck = [
         'vehicle-installment-auth',
-        'supabase.auth.token'
+        'supabase.auth.token',
     ];
     
     keysToCheck.forEach(key => {
         if (localStorage.getItem(key)) {
             console.log(`🧹 Clearing legacy auth key: ${key}`);
+            localStorage.removeItem(key);
+        }
+    });
+
+    // Also clear any keys that match the Supabase pattern (sb-<ref>-auth-token)
+    Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('sb-') && key.includes('-auth-token')) {
+            console.log(`🧹 Clearing Supabase auth key: ${key}`);
             localStorage.removeItem(key);
         }
     });

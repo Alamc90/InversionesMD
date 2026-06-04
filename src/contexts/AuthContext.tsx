@@ -1,7 +1,7 @@
 "use client"
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import { supabase } from '@/config/supabaseClient';
+import { supabase, clearCorruptedAuthTokens } from '@/config/supabaseClient';
 import { Session, User } from '@supabase/supabase-js';
 import { Business, BusinessMember, UserPermissions, DEFAULT_ADMIN_PERMISSIONS } from '@/models/Business';
 
@@ -57,6 +57,27 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = () => useContext(AuthContext);
 
+// ---- Constants ----
+const AUTH_TIMEOUT_MS = 5000; // 5 seconds, matching Stockwear
+const RELOAD_FLAG_KEY = 'auth_deadlock_reload';
+
+// ---- Helper: Promise.race with timeout (Stockwear pattern) ----
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T | null> {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    const timeoutPromise = new Promise<null>((resolve) => {
+        timeoutId = setTimeout(() => {
+            console.warn(`[AuthContext] Timeout reached (${ms}ms) for: ${label}`);
+            resolve(null);
+        }, ms);
+    });
+
+    return Promise.race([promise, timeoutPromise]).then((result) => {
+        clearTimeout(timeoutId);
+        return result;
+    });
+}
+
 // ---- Helper functions (outside component to avoid re-creation) ----
 
 interface MembershipResult {
@@ -67,6 +88,10 @@ interface MembershipResult {
     tablesNotReady: boolean;
 }
 
+/**
+ * Simplified fetchMembership — no internal retries or AbortControllers.
+ * The timeout control is handled at the caller level via Promise.race.
+ */
 async function fetchMembership(user: User): Promise<MembershipResult> {
     const empty: MembershipResult = {
         business: null, membership: null,
@@ -74,52 +99,13 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
     };
 
     try {
-        // Ejecutamos la consulta con un AbortController para romper deadlocks
-        let memberResult: any = null;
-        let lastError: any = null;
-
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => {
-                controller.abort(new Error('Timeout'));
-            }, 6000); // 6 segundos de límite duro por intento
-
-            try {
-                console.log(`[AuthContext] Fetching membership (Attempt ${attempt}/3)...`);
-                const result = await supabase
-                    .from('business_members')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .limit(1)
-                    .abortSignal(controller.signal)
-                    .maybeSingle();
-
-                clearTimeout(timeoutId);
-
-                // Si fue abortado a nivel de red, el mensaje suele decir "aborted"
-                if (result.error && result.error.message?.toLowerCase().includes('abort')) {
-                    throw result.error;
-                }
-
-                memberResult = result;
-                break; // Éxito, salir del loop
-            } catch (err: any) {
-                clearTimeout(timeoutId);
-                console.warn(`[AuthContext] fetchMembership attempt ${attempt} failed/timed out:`, err.message || err);
-                lastError = err;
-
-                if (attempt === 3) break; // Si era el último, rendirse
-                // Esperar 1 segundo antes de intentar de nuevo
-                await new Promise(r => setTimeout(r, 1000));
-            }
-        }
-
-        if (!memberResult) {
-            console.error('[AuthContext] Todas las retries fallaron. Último error:', lastError);
-            return empty;
-        }
-
-        const result = memberResult;
+        console.log('[AuthContext] Fetching membership...');
+        const result = await supabase
+            .from('business_members')
+            .select('*')
+            .eq('user_id', user.id)
+            .limit(1)
+            .maybeSingle();
 
         // Si la tabla no existe (42P01), es local sin migraciones
         if (result.error && (result.error.code === '42P01' || result.error.message?.includes('does not exist'))) {
@@ -134,6 +120,13 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
 
         if (result.error && result.error.code !== 'PGRST116') {
             console.error('Error fetching membership:', result.error);
+
+            // Check for refresh token errors (Stockwear pattern)
+            if (result.error.message?.includes('Refresh Token')) {
+                console.warn('🧹 Corrupted refresh token detected in fetchMembership');
+                clearCorruptedAuthTokens();
+            }
+
             throw result.error;
         }
 
@@ -166,37 +159,12 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
         try {
             const email = user.email;
             if (email) {
-                let invitationResult: any = null;
-
-                for (let attempt = 1; attempt <= 3; attempt++) {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(new Error('Timeout')), 6000);
-
-                    try {
-                        const result = await supabase
-                            .from('business_invitations')
-                            .select('*')
-                            .eq('email', email)
-                            .eq('accepted', false)
-                            .abortSignal(controller.signal)
-                            .maybeSingle();
-
-                        clearTimeout(timeoutId);
-
-                        if (result.error && result.error.message?.toLowerCase().includes('abort')) {
-                            throw result.error;
-                        }
-
-                        invitationResult = result;
-                        break;
-                    } catch (err: any) {
-                        clearTimeout(timeoutId);
-                        if (attempt === 3) break;
-                        await new Promise(r => setTimeout(r, 1000));
-                    }
-                }
-
-                if (!invitationResult) throw new Error('Invitations query failed after retries');
+                const invitationResult = await supabase
+                    .from('business_invitations')
+                    .select('*')
+                    .eq('email', email)
+                    .eq('accepted', false)
+                    .maybeSingle();
 
                 if (invitationResult.error) {
                     throw invitationResult.error;
@@ -221,7 +189,7 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
                         .select('*, businesses(*)')
                         .single();
 
-                    // 409 means Conflict (The member already exists due to a parallel race condition)
+                    // 23505 means unique constraint violation (member already exists)
                     if (insertError && insertError.code === '23505') {
                         console.log('[AuthContext] Member already inserted. Retrying fetch...');
                         return fetchMembership(user); // Loop back once
@@ -251,6 +219,11 @@ async function fetchMembership(user: User): Promise<MembershipResult> {
 
         return empty;
     } catch (error) {
+        // Check for refresh token errors (Stockwear pattern)
+        if (error instanceof Error && error.message?.includes('Refresh Token')) {
+            console.warn('🧹 Corrupted refresh token detected in fetchMembership catch');
+            clearCorruptedAuthTokens();
+        }
         console.error('Error in fetchMembership:', error);
         return empty;
     }
@@ -269,119 +242,199 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const [tablesNotReady, setTablesNotReady] = useState(false);
     const [loadingSlow, setLoadingSlow] = useState(false);
     const membershipCache = useRef<MembershipResult | null>(null);
-    const activeCheckRef = useRef<Promise<void> | null>(null);
+    const initDone = useRef(false);
 
-    const applyMembership = (result: MembershipResult) => {
+    const applyMembership = useCallback((result: MembershipResult) => {
         membershipCache.current = result;
         setBusiness(result.business);
         setMembership(result.membership);
         setPermissions(result.permissions);
         setIsAdmin(result.isAdmin);
         setTablesNotReady(result.tablesNotReady);
-    };
+    }, []);
 
+    // ---- Mount-based initialization (Stockwear pattern) ----
+    // Instead of relying on onAuthStateChange for the initial load,
+    // we proactively fetch the session on mount and wrap it in a timeout.
     useEffect(() => {
         let isMounted = true;
         let slowTimer: ReturnType<typeof setTimeout>;
 
-        // Safety net: always stop loading after 30s absolute max
-        const safetyTimeout = setTimeout(() => {
-            if (isMounted) {
-                setLoading((current) => {
-                    if (current) {
-                        console.warn('[AuthContext] Safety timeout: forcing loading=false after 30s');
-                    }
-                    return false;
-                });
-            }
-        }, 30000);
+        const initialize = async () => {
+            console.log('[AuthContext] Initializing (mount-based)...');
 
-        const internalCheckAuth = async (s: Session | null, forceSetLoading: boolean) => {
-            if (!isMounted) return;
-            setSession(s);
-            setUser(s?.user ?? null);
+            // Show slow loading indicator after 3 seconds
+            slowTimer = setTimeout(() => {
+                if (isMounted) setLoadingSlow(true);
+            }, 3000);
 
-            if (s?.user) {
-                // Solo mostrar loader de pantalla completa si es forzado o si no hay datos previos
-                if (forceSetLoading && !membershipCache.current) {
-                    setLoading(true);
-                    setLoadingSlow(false);
-                    // Si pasan 5s, indicar que está tardando más de lo esperado
-                    slowTimer = setTimeout(() => {
-                        if (isMounted) setLoadingSlow(true);
-                    }, 5000);
+            try {
+                // Step 1: Get session with timeout (Stockwear pattern)
+                const sessionResult = await withTimeout(
+                    supabase.auth.getSession(),
+                    AUTH_TIMEOUT_MS,
+                    'getSession'
+                );
+
+                if (!isMounted) return;
+
+                // Timeout case: sessionResult is null
+                if (!sessionResult) {
+                    console.warn('[AuthContext] getSession timed out — possible Supabase deadlock');
+                    handleDeadlockRecovery();
+                    return;
                 }
 
-                // Sin timeout — dejamos que la query corra hasta que responda
-                try {
-                    const result = await fetchMembership(s.user);
+                const currentSession = sessionResult.data?.session;
+
+                if (!currentSession) {
+                    // No session = not logged in
+                    console.log('[AuthContext] No session found');
                     if (isMounted) {
-                        applyMembership(result);
+                        setSession(null);
+                        setUser(null);
+                        setBusiness(null);
+                        setMembership(null);
+                        setPermissions(defaultPermissions);
+                        setIsAdmin(false);
+                        setLoading(false);
                     }
-                } catch (error) {
-                    console.error('[AuthContext] fetchMembership error:', error);
-                    // On error, apply cache if available, otherwise empty state
-                    if (isMounted && membershipCache.current) {
-                        applyMembership(membershipCache.current);
-                    }
+                    return;
                 }
 
+                // We have a session
+                if (isMounted) {
+                    setSession(currentSession);
+                    setUser(currentSession.user);
+                }
+
+                // Step 2: Fetch membership with timeout (Stockwear pattern)
+                const membershipResult = await withTimeout(
+                    fetchMembership(currentSession.user),
+                    AUTH_TIMEOUT_MS,
+                    'fetchMembership'
+                );
+
+                if (!isMounted) return;
+
+                if (!membershipResult) {
+                    console.warn('[AuthContext] fetchMembership timed out');
+                    handleDeadlockRecovery();
+                    return;
+                }
+
+                applyMembership(membershipResult);
+
+            } catch (error) {
+                console.error('[AuthContext] Initialization error:', error);
+
+                if (error instanceof Error && error.message?.includes('Refresh Token')) {
+                    console.warn('🧹 Corrupted refresh token detected during init');
+                    clearCorruptedAuthTokens();
+                }
+            } finally {
                 if (isMounted) {
                     clearTimeout(slowTimer);
                     setLoadingSlow(false);
                     setLoading(false);
-                }
-            } else {
-                membershipCache.current = null;
-                if (isMounted) {
-                    setBusiness(null);
-                    setMembership(null);
-                    setPermissions(defaultPermissions);
-                    setIsAdmin(false);
-                    setLoading(false);
+                    initDone.current = true;
+                    // Clear the reload flag on successful initialization
+                    if (typeof window !== 'undefined') {
+                        sessionStorage.removeItem(RELOAD_FLAG_KEY);
+                    }
                 }
             }
         };
 
-        const checkAuth = async (s: Session | null, forceSetLoading: boolean = true) => {
-            // Wait for any previous checkAuth to finish before starting a new one
-            // This prevents concurrent membership fetches if multiple auth events fire quickly
-            while (activeCheckRef.current) {
-                await activeCheckRef.current;
+        /**
+         * Deadlock recovery: if the Supabase client is stuck (internal lock),
+         * attempt a single hard page reload. This historically breaks the deadlock.
+         * A sessionStorage flag prevents infinite reload loops.
+         */
+        const handleDeadlockRecovery = () => {
+            if (typeof window === 'undefined' || !isMounted) return;
+
+            const alreadyReloaded = sessionStorage.getItem(RELOAD_FLAG_KEY);
+            if (alreadyReloaded) {
+                // Already tried reloading once — give up and show the app as logged out
+                console.warn('[AuthContext] Deadlock persists after reload. Falling back to logged-out state.');
+                sessionStorage.removeItem(RELOAD_FLAG_KEY);
+                setSession(null);
+                setUser(null);
+                setBusiness(null);
+                setMembership(null);
+                setPermissions(defaultPermissions);
+                setIsAdmin(false);
+                setLoading(false);
+                return;
             }
 
-            const checkPromise = internalCheckAuth(s, forceSetLoading);
-            activeCheckRef.current = checkPromise;
-
-            try {
-                await checkPromise;
-            } finally {
-                // Remove the lock once done, but only if it's our promise
-                if (activeCheckRef.current === checkPromise) {
-                    activeCheckRef.current = null;
-                }
-                if (isMounted) clearTimeout(safetyTimeout);
-            }
+            console.log('[AuthContext] Attempting deadlock recovery via page reload...');
+            sessionStorage.setItem(RELOAD_FLAG_KEY, '1');
+            clearCorruptedAuthTokens();
+            window.location.reload();
         };
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, s) => {
+        initialize();
+
+        // ---- Passive onAuthStateChange listener (Stockwear pattern) ----
+        // This listener does NOT trigger the initial load. It only reacts to
+        // subsequent auth events like sign-out or token refresh.
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, s) => {
             if (!isMounted) return;
 
-            // Si ya tenemos en caché la información de membresía y el id de usuario coincide,
-            // simplemente actualizamos la sesión pero omitimos la recarga completa para evitar loops de UI
-            if (s?.user && membershipCache.current?.membership?.user_id === s.user.id) {
+            // Ignore the INITIAL_SESSION event — we handle it ourselves above
+            if (event === 'INITIAL_SESSION') return;
+
+            if (event === 'SIGNED_OUT') {
+                console.log('[AuthContext] User signed out');
+                membershipCache.current = null;
+                setSession(null);
+                setUser(null);
+                setBusiness(null);
+                setMembership(null);
+                setPermissions(defaultPermissions);
+                setIsAdmin(false);
+                setLoading(false);
+                return;
+            }
+
+            if (event === 'TOKEN_REFRESHED' && s) {
+                // Just update the session/user objects in memory, don't re-fetch membership
                 setSession(s);
                 setUser(s.user);
                 return;
             }
 
-            // Forzamos el loading de la UI solo en el inicio (si no hay cache), los demás eventos son silenciosos
-            await checkAuth(s, _event === 'INITIAL_SESSION');
+            if (event === 'SIGNED_IN' && s) {
+                // If the cache already has this user's data, just update session
+                if (membershipCache.current?.membership?.user_id === s.user.id) {
+                    setSession(s);
+                    setUser(s.user);
+                    return;
+                }
+
+                // New sign-in (different user or first time) — re-fetch membership
+                setSession(s);
+                setUser(s.user);
+                try {
+                    const result = await withTimeout(
+                        fetchMembership(s.user),
+                        AUTH_TIMEOUT_MS,
+                        'fetchMembership (SIGNED_IN)'
+                    );
+                    if (isMounted && result) {
+                        applyMembership(result);
+                    }
+                } catch (error) {
+                    console.error('[AuthContext] Error fetching membership on SIGNED_IN:', error);
+                }
+                if (isMounted) setLoading(false);
+            }
         });
 
         return () => {
             isMounted = false;
-            clearTimeout(safetyTimeout);
             clearTimeout(slowTimer);
             subscription.unsubscribe();
         };
@@ -389,12 +442,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }, []);
 
     const refreshMembership = useCallback(async () => {
-        const { data: { session: s } } = await supabase.auth.getSession();
-        if (s?.user) {
-            const result = await fetchMembership(s.user);
-            applyMembership(result);
+        const sessionResult = await withTimeout(
+            supabase.auth.getSession(),
+            AUTH_TIMEOUT_MS,
+            'refreshMembership.getSession'
+        );
+        if (sessionResult?.data?.session?.user) {
+            const result = await withTimeout(
+                fetchMembership(sessionResult.data.session.user),
+                AUTH_TIMEOUT_MS,
+                'refreshMembership.fetchMembership'
+            );
+            if (result) {
+                applyMembership(result);
+            }
         }
-    }, []);
+    }, [applyMembership]);
 
     const hasPermission = useCallback((permission: keyof UserPermissions): boolean => {
         if (isAdmin || tablesNotReady) return true;
