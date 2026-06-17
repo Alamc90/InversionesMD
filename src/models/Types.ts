@@ -25,6 +25,8 @@ export interface Vehicle {
 export interface InstallmentPlan {
     id?: number;
     vehicle_id?: number;
+    customer_id?: number;
+    status?: 'ACTIVO' | 'FINALIZADO' | 'CERRADO';
     total_installments: number;
     installment_value: number;
     installments_paid: number;

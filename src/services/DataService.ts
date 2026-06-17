@@ -142,7 +142,16 @@ export const DataService = {
       if (resolvedBusinessId) vehiclePayload.business_id = resolvedBusinessId;
 
       let vehicleData: any = null;
-      if (vehicle.plate && resolvedBusinessId) {
+      if (vehicle.id) {
+          const { data: updated, error: updateErr } = await supabase
+              .from('vehicles')
+              .update(vehiclePayload)
+              .eq('id', vehicle.id)
+              .select()
+              .single();
+          if (updateErr) throw updateErr;
+          vehicleData = updated;
+      } else if (vehicle.plate && resolvedBusinessId) {
           const { data: existing } = await supabase
               .from('vehicles')
               .select('*')
@@ -178,6 +187,8 @@ export const DataService = {
       const planPayload: any = {
             user_id: user.id,
             vehicle_id: vehicleData.id,
+            customer_id: customerData.id,
+            status: 'ACTIVO',
             // Nuevos campos financieros
             capital_amount: plan.capital_amount,
             interest_rate: plan.interest_rate,
@@ -214,7 +225,7 @@ export const DataService = {
       .select(`
         *,
         customers ( first_name, last_name ),
-        installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency, excluded_days )
+        installment_plans ( id, total_installments, installments_paid, installment_value, start_date, payment_frequency, excluded_days, status )
       `);
     
     if (resolvedBusinessId) {
@@ -223,7 +234,17 @@ export const DataService = {
       
     const { data, error } = await query;
     if (error) throw error;
-    return data;
+    
+    // Return only vehicles that are currently active (have customer_id and have an active plan)
+    return (data || []).filter((v: any) => {
+        if (!v.customer_id) return false;
+        const plans = Array.isArray(v.installment_plans) ? v.installment_plans : (v.installment_plans ? [v.installment_plans] : []);
+        if (plans.length === 0) return false;
+        
+        // Sort plans by ID descending to get the latest one
+        const sortedPlans = [...plans].sort((a: any, b: any) => (b.id || 0) - (a.id || 0));
+        return sortedPlans[0].status === 'ACTIVO';
+    });
   },
 
   /**
@@ -286,7 +307,7 @@ export const DataService = {
   async recalculateInstallmentsPaid(planId: number): Promise<number> {
     const { data: plan, error: planError } = await supabase
         .from('installment_plans')
-        .select('installment_value')
+        .select('installment_value, total_installments, status')
         .eq('id', planId)
         .single();
     
@@ -326,9 +347,22 @@ export const DataService = {
 
     console.log(`Recalculating payment: TotalPaid ${totalPaid}, Value ${instValue}, NewPaid ${newInstallmentsPaid}`);
 
+    const updatePayload: any = { installments_paid: newInstallmentsPaid };
+
+    // Automatically complete plan when paid in full
+    if (newInstallmentsPaid >= Number(plan.total_installments)) {
+        if (plan.status === 'ACTIVO') {
+            updatePayload.status = 'FINALIZADO';
+        }
+    } else {
+        if (plan.status === 'FINALIZADO') {
+            updatePayload.status = 'ACTIVO';
+        }
+    }
+
     const { error: updateError } = await supabase
         .from('installment_plans')
-        .update({ installments_paid: newInstallmentsPaid })
+        .update(updatePayload)
         .eq('id', planId);
 
     if (updateError) {
@@ -743,5 +777,65 @@ async getPaymentPlanTemplates(businessId?: string): Promise<PaymentPlanTemplate[
           .eq('id', id);
           
       if (error) throw error;
+  },
+
+  async getFreeVehicles(businessId?: string) {
+      const resolvedBusinessId = businessId || await this.getBusinessId();
+      
+      let query = supabase
+          .from('vehicles')
+          .select('*')
+          .is('customer_id', null)
+          .order('model', { ascending: true });
+          
+      if (resolvedBusinessId) {
+          query = query.eq('business_id', resolvedBusinessId);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+  },
+
+  async closeInstallmentPlan(planId: number, vehicleId: number) {
+      // 1. Update status of the installment plan to CERRADO
+      const { error: planErr } = await supabase
+          .from('installment_plans')
+          .update({ status: 'CERRADO' })
+          .eq('id', planId);
+          
+      if (planErr) throw planErr;
+
+      // 2. Free up the vehicle by setting customer_id to null
+      const { error: vehicleErr } = await supabase
+          .from('vehicles')
+          .update({ customer_id: null })
+          .eq('id', vehicleId);
+          
+      if (vehicleErr) throw vehicleErr;
+
+      return { success: true };
+  },
+
+  async getClosedDeliveries(businessId?: string) {
+      const resolvedBusinessId = businessId || await this.getBusinessId();
+      
+      let query = supabase
+          .from('installment_plans')
+          .select(`
+              *,
+              customers ( first_name, last_name, cedula, phone ),
+              vehicles ( model, plate, year, color )
+          `)
+          .in('status', ['FINALIZADO', 'CERRADO'])
+          .order('id', { ascending: false });
+          
+      if (resolvedBusinessId) {
+          query = query.eq('business_id', resolvedBusinessId);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
   }
 };

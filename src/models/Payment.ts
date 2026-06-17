@@ -2,6 +2,8 @@ export interface InstallmentPlan {
     id?: number;
     vehicle_id?: number;
     business_id?: string;
+    customer_id?: number;
+    status?: 'ACTIVO' | 'FINALIZADO' | 'CERRADO';
     
     // Configuración Financiera
     capital_amount?: number;    // Monto financiado (Precio - Inicial)

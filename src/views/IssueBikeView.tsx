@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CustomerForm } from '../components/CustomerForm';
 import { DataService } from '../services/DataService';
 import { Customer } from '../models/Customer';
@@ -11,12 +11,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import { useAuth } from '@/contexts/AuthContext';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 export const IssueBikeView: React.FC = () => {
     const { business } = useAuth();
     const [step, setStep] = useState(1);
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [vehicle, setVehicle] = useState<Vehicle | null>(null);
+    const [freeVehicles, setFreeVehicles] = useState<Vehicle[]>([]);
+    const [loadingFree, setLoadingFree] = useState(false);
+    const [vehicleMode, setVehicleMode] = useState<'new' | 'existing'>('new');
+    const [selectedVehicleId, setSelectedVehicleId] = useState<string>('');
+
+    useEffect(() => {
+        if (step === 2 && business?.id) {
+            setLoadingFree(true);
+            DataService.getFreeVehicles(business.id)
+                .then((data) => {
+                    setFreeVehicles(data);
+                    if (data.length > 0) {
+                        setVehicleMode('existing');
+                        setSelectedVehicleId(data[0].id?.toString() || '');
+                    } else {
+                        setVehicleMode('new');
+                    }
+                })
+                .catch((err) => console.error("Error loading free vehicles:", err))
+                .finally(() => setLoadingFree(false));
+        }
+    }, [step, business?.id]);
 
     const handleCustomerSubmit = (data: Customer) => {
         setCustomer(data);
@@ -68,39 +91,95 @@ export const IssueBikeView: React.FC = () => {
                         <CardTitle>Datos del Vehículo</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <form onSubmit={(e) => {
-                            e.preventDefault();
-                            const fd = new FormData(e.currentTarget);
-                            handleVehicleSubmit({
-                                model: fd.get('model') as string,
-                                year: Number(fd.get('year')),
-                                color: fd.get('color') as string,
-                                plate: fd.get('plate') as string
-                            });
-                        }} className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="model">Marca/Línea</Label>
-                                    <Input id="model" name="model" placeholder="Marca/Línea" required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="year">Modelo</Label>
-                                    <Input id="year" name="year" type="number" placeholder="Modelo" required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="color">Color</Label>
-                                    <Input id="color" name="color" placeholder="Color" required />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="plate">Placa</Label>
-                                    <Input id="plate" name="plate" placeholder="Placa" required />
-                                </div>
+                        {loadingFree ? (
+                            <div className="flex justify-center py-6 text-sm text-muted-foreground">
+                                Cargando vehículos disponibles...
                             </div>
-                            <div className="flex gap-4">
-                                <Button type="button" variant="outline" onClick={() => setStep(1)}>Atrás</Button>
-                                <Button type="submit">Siguiente</Button>
-                            </div>
-                        </form>
+                        ) : (
+                            <>
+                                {freeVehicles.length > 0 && (
+                                    <div className="flex gap-2 p-1 bg-muted rounded-lg mb-6 max-w-md">
+                                        <Button 
+                                            type="button" 
+                                            variant={vehicleMode === 'existing' ? 'default' : 'ghost'} 
+                                            className="flex-1" 
+                                            onClick={() => setVehicleMode('existing')}
+                                        >
+                                            Vehículo Disponible
+                                        </Button>
+                                        <Button 
+                                            type="button" 
+                                            variant={vehicleMode === 'new' ? 'default' : 'ghost'} 
+                                            className="flex-1" 
+                                            onClick={() => setVehicleMode('new')}
+                                        >
+                                            Registrar Nuevo
+                                        </Button>
+                                    </div>
+                                )}
+
+                                <form onSubmit={(e) => {
+                                    e.preventDefault();
+                                    if (vehicleMode === 'existing') {
+                                        const selected = freeVehicles.find(v => v.id?.toString() === selectedVehicleId);
+                                        if (!selected) {
+                                            toast.error('Por favor seleccione un vehículo válido');
+                                            return;
+                                        }
+                                        handleVehicleSubmit(selected);
+                                    } else {
+                                        const fd = new FormData(e.currentTarget);
+                                        handleVehicleSubmit({
+                                            model: fd.get('model') as string,
+                                            year: Number(fd.get('year')),
+                                            color: fd.get('color') as string,
+                                            plate: fd.get('plate') as string
+                                        });
+                                    }
+                                }} className="space-y-4">
+                                    {vehicleMode === 'existing' ? (
+                                        <div className="space-y-2">
+                                            <Label htmlFor="existingVehicleSelect">Seleccionar Moto Recuperada / Libre</Label>
+                                            <Select value={selectedVehicleId} onValueChange={(val) => setSelectedVehicleId(val)}>
+                                                <SelectTrigger className="w-full bg-background">
+                                                    <SelectValue placeholder="Seleccione un vehículo..." />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    {freeVehicles.map((v) => (
+                                                        <SelectItem key={v.id} value={v.id?.toString() || ''}>
+                                                            {v.model} - {v.plate} ({v.color})
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                            <div className="space-y-2">
+                                                <Label htmlFor="model">Marca/Línea</Label>
+                                                <Input id="model" name="model" placeholder="Marca/Línea" required />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="year">Modelo</Label>
+                                                <Input id="year" name="year" type="number" placeholder="Modelo" required />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="color">Color</Label>
+                                                <Input id="color" name="color" placeholder="Color" required />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="plate">Placa</Label>
+                                                <Input id="plate" name="plate" placeholder="Placa" required />
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="flex gap-4 pt-4">
+                                        <Button type="button" variant="outline" onClick={() => setStep(1)}>Atrás</Button>
+                                        <Button type="submit">Siguiente</Button>
+                                    </div>
+                                </form>
+                            </>
+                        )}
                     </CardContent>
                 </Card>
             )}
@@ -111,3 +190,5 @@ export const IssueBikeView: React.FC = () => {
         </div>
     );
 };
+
+export default IssueBikeView;

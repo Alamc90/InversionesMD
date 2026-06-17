@@ -45,6 +45,10 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose, on
     const [isLiquidationOpen, setIsLiquidationOpen] = useState(false);
     const [liquidationPercentage, setLiquidationPercentage] = useState<number | ''>(5);
 
+    // Close delivery state
+    const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
+    const [closingPlan, setClosingPlan] = useState(false);
+
     useEffect(() => {
         if (isOpen && vehicleId) {
             loadData();
@@ -308,6 +312,25 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose, on
         }
     };
 
+    const handleCloseDelivery = async () => {
+        if (!plan) return;
+        setClosingPlan(true);
+        try {
+            await DataService.closeInstallmentPlan(plan.id, vehicleId);
+            toast.success('Entrega cerrada exitosamente. El vehículo ahora está disponible.');
+            setIsCloseConfirmOpen(false);
+            if (onPaymentComplete) {
+                onPaymentComplete();
+            }
+            onClose();
+        } catch (error: any) {
+            toast.error(`Error al cerrar entrega: ${error.message || 'Error del servidor'}`);
+            console.error(error);
+        } finally {
+            setClosingPlan(false);
+        }
+    };
+
     if (!isOpen) return null;
 
     if (loadingData || !details) {
@@ -540,6 +563,17 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose, on
                                             </div>
                                         </>
                                     ) : null}
+                                    {plan && plan.status === 'ACTIVO' && hasPermission('can_create_deliveries') && (
+                                        <div className="pt-4 border-t mt-4">
+                                            <Button 
+                                                variant="destructive" 
+                                                className="w-full bg-red-600 hover:bg-red-700 text-white"
+                                                onClick={() => setIsCloseConfirmOpen(true)}
+                                            >
+                                                Cerrar Entrega (Quitar Moto)
+                                            </Button>
+                                        </div>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
@@ -837,6 +871,36 @@ export const PaymentManager: React.FC<Props> = ({ vehicleId, isOpen, onClose, on
                             <div className="flex justify-end gap-2 mt-4">
                                 <Button variant="outline" onClick={() => setIsLiquidationOpen(false)}>Cancelar</Button>
                                 <Button onClick={confirmLiquidation}>Cargar monto a pago</Button>
+                            </div>
+                        </div>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={isCloseConfirmOpen} onOpenChange={setIsCloseConfirmOpen}>
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Cerrar Entrega (Quitar Moto)</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4 py-4">
+                            <p className="text-sm text-muted-foreground">
+                                ¿Está seguro de cerrar esta entrega de forma prematura? 
+                                Esto se utiliza para cuando se le quita la moto al cliente por falta de pago o incumplimiento de contrato.
+                            </p>
+                            <p className="text-sm font-semibold text-red-600 bg-red-50 p-3 rounded-lg border border-red-200">
+                                IMPORTANTE: El vehículo quedará libre y disponible para una nueva entrega. Los registros de todos los pagos ya realizados NO se borrarán y se conservarán en el historial.
+                            </p>
+                            <div className="flex justify-end gap-2 mt-4">
+                                <Button variant="outline" onClick={() => setIsCloseConfirmOpen(false)} disabled={closingPlan}>
+                                    Cancelar
+                                </Button>
+                                <Button 
+                                    variant="destructive" 
+                                    onClick={handleCloseDelivery} 
+                                    disabled={closingPlan}
+                                    className="bg-red-600 hover:bg-red-700 text-white"
+                                >
+                                    {closingPlan ? 'Cerrando entrega...' : 'Confirmar Cierre'}
+                                </Button>
                             </div>
                         </div>
                     </DialogContent>
