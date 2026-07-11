@@ -3,7 +3,7 @@ import { DataService } from '../services/DataService';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ChevronDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { PaymentManager } from './PaymentManager';
 import { calculateOverdueInfo } from '@/lib/paymentUtils';
 import { useAuth } from '@/contexts/AuthContext';
@@ -13,7 +13,37 @@ export const MotorcycleList: React.FC = () => {
     const [vehicles, setVehicles] = useState<any[]>([]);
     const [selectedVehicleId, setSelectedVehicleId] = useState<number | null>(null);
     const [searchQuery, setSearchQuery] = useState("");
-    const [sortBy, setSortBy] = useState("recent");
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'recent', direction: 'desc' });
+    const [isSortDropdownOpen, setIsSortDropdownOpen] = useState(false);
+    const sortDropdownRef = React.useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (sortDropdownRef.current && !sortDropdownRef.current.contains(event.target as Node)) {
+                setIsSortDropdownOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const sortOptions = [
+        { key: 'status', label: 'Estado de cuenta', defaultDir: 'asc' },
+        { key: 'recent', label: 'Fecha de registro', defaultDir: 'desc' },
+        { key: 'client', label: 'Cliente', defaultDir: 'asc' },
+        { key: 'plate', label: 'Placa', defaultDir: 'asc' },
+        { key: 'pending', label: 'Cuotas atrasadas', defaultDir: 'desc' },
+        { key: 'progress', label: 'Progreso de pago', defaultDir: 'asc' }
+    ];
+
+    const handleSortOptionClick = (key: string, defaultDir: 'asc' | 'desc') => {
+        if (sortConfig.key === key) {
+            setSortConfig({ key, direction: sortConfig.direction === 'asc' ? 'desc' : 'asc' });
+        } else {
+            setSortConfig({ key, direction: defaultDir });
+        }
+        setIsSortDropdownOpen(false);
+    };
 
     useEffect(() => {
         if (business?.id) {
@@ -95,42 +125,39 @@ export const MotorcycleList: React.FC = () => {
             return 1; // Up to date
         };
 
-        if (sortBy === 'status') {
-            const scoreA = getStatusScore(a);
-            const scoreB = getStatusScore(b);
-            if (scoreA !== scoreB) {
-                return scoreA - scoreB;
-            }
-            // If same status, sort by pending desc
-            return getPending(b) - getPending(a);
+        let comparison = 0;
+        
+        switch (sortConfig.key) {
+            case 'status':
+                const scoreA = getStatusScore(a);
+                const scoreB = getStatusScore(b);
+                if (scoreA !== scoreB) {
+                    comparison = scoreA - scoreB;
+                } else {
+                    comparison = getPending(b) - getPending(a);
+                }
+                break;
+            case 'client':
+                const nameA = (a.customers?.first_name || '') + ' ' + (a.customers?.last_name || '');
+                const nameB = (b.customers?.first_name || '') + ' ' + (b.customers?.last_name || '');
+                comparison = nameA.localeCompare(nameB);
+                break;
+            case 'plate':
+                comparison = (a.plate || '').localeCompare(b.plate || '');
+                break;
+            case 'pending':
+                comparison = getOverdue(a) - getOverdue(b);
+                break;
+            case 'progress':
+                comparison = getProgressPercent(a) - getProgressPercent(b);
+                break;
+            case 'recent':
+            default:
+                comparison = (a.id || 0) - (b.id || 0); // ascending by id
+                break;
         }
-        if (sortBy === 'client_asc') {
-            const nameA = (a.customers?.first_name || '') + ' ' + (a.customers?.last_name || '');
-            const nameB = (b.customers?.first_name || '') + ' ' + (b.customers?.last_name || '');
-            return nameA.localeCompare(nameB);
-        }
-        if (sortBy === 'client_desc') {
-            const nameA = (a.customers?.first_name || '') + ' ' + (a.customers?.last_name || '');
-            const nameB = (b.customers?.first_name || '') + ' ' + (b.customers?.last_name || '');
-            return nameB.localeCompare(nameA);
-        }
-        if (sortBy === 'plate_asc') {
-            return (a.plate || '').localeCompare(b.plate || '');
-        }
-        if (sortBy === 'pending_asc') {
-            return getOverdue(a) - getOverdue(b);
-        }
-        if (sortBy === 'pending_desc') {
-            return getOverdue(b) - getOverdue(a);
-        }
-        if (sortBy === 'progress_asc') {
-            return getProgressPercent(a) - getProgressPercent(b);
-        }
-        if (sortBy === 'progress_desc') {
-            return getProgressPercent(b) - getProgressPercent(a);
-        }
-        // default recent
-        return (b.id || 0) - (a.id || 0);
+
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
 
     return (
@@ -138,23 +165,38 @@ export const MotorcycleList: React.FC = () => {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                 <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Vehículos Entregados</h2>
                 <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-2">
-                    <div className="w-full sm:w-[220px]">
-                        <Select value={sortBy} onValueChange={setSortBy}>
-                            <SelectTrigger className="w-full bg-background">
-                                <SelectValue placeholder="Ordenar por" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="status">Estado (Atrasados primero)</SelectItem>
-                                <SelectItem value="recent">Más recientes</SelectItem>
-                                <SelectItem value="client_asc">Cliente (A-Z)</SelectItem>
-                                <SelectItem value="client_desc">Cliente (Z-A)</SelectItem>
-                                <SelectItem value="plate_asc">Placa (A-Z)</SelectItem>
-                                <SelectItem value="pending_asc">Menos cuotas atrasadas (Al día primero)</SelectItem>
-                                <SelectItem value="pending_desc">Más cuotas atrasadas</SelectItem>
-                                <SelectItem value="progress_asc">Progreso de pago (Menor primero)</SelectItem>
-                                <SelectItem value="progress_desc">Progreso de pago (Mayor primero)</SelectItem>
-                            </SelectContent>
-                        </Select>
+                    <div className="w-full sm:w-[220px] relative" ref={sortDropdownRef}>
+                        <Button 
+                            variant="outline" 
+                            className="w-full justify-between bg-background text-sm font-normal"
+                            onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
+                        >
+                            <span className="truncate flex-1 text-left">
+                                {sortOptions.find(opt => opt.key === sortConfig.key)?.label || 'Ordenar por'}
+                            </span>
+                            {sortConfig.direction === 'asc' ? <ArrowUp className="ml-2 h-4 w-4 shrink-0 opacity-50" /> : <ArrowDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
+                        </Button>
+                        {isSortDropdownOpen && (
+                            <div className="absolute top-full mt-1 w-full bg-popover text-popover-foreground border rounded-md shadow-md z-50 overflow-hidden">
+                                <div className="p-1">
+                                    {sortOptions.map((option) => {
+                                        const isSelected = sortConfig.key === option.key;
+                                        return (
+                                            <div
+                                                key={option.key}
+                                                className={`relative flex w-full cursor-pointer select-none items-center rounded-sm py-2 px-3 text-sm outline-none hover:bg-accent hover:text-accent-foreground transition-colors ${isSelected ? 'bg-accent/50 text-accent-foreground' : ''}`}
+                                                onClick={() => handleSortOptionClick(option.key, option.defaultDir as 'asc' | 'desc')}
+                                            >
+                                                <span className="flex-1">{option.label}</span>
+                                                {isSelected && (
+                                                    sortConfig.direction === 'asc' ? <ArrowUp className="h-4 w-4 opacity-70" /> : <ArrowDown className="h-4 w-4 opacity-70" />
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        )}
                     </div>
                     <Input
                         placeholder="Buscar por placa o cliente..."

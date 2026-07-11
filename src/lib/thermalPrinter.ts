@@ -322,19 +322,38 @@ async function autoReconnectBluetooth(saved: SavedPrinter): Promise<boolean> {
     // We need to request watchAdvertisements and wait, or try direct connect
     const server = await device.gatt.connect();
 
+    // Pequeño delay para que el stack de Bluetooth de Windows se estabilice tras reconectar
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     let characteristic: any = null;
-    for (const serviceUUID of BT_SERVICES) {
+    let retries = 3;
+
+    while (retries > 0 && !characteristic) {
       try {
-        const service = await server.getPrimaryService(serviceUUID);
-        const chars = await service.getCharacteristics();
-        for (const char of chars) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            characteristic = char;
-            break;
-          }
+        for (const serviceUUID of BT_SERVICES) {
+          try {
+            const service = await server.getPrimaryService(serviceUUID);
+            const chars = await service.getCharacteristics();
+            for (const char of chars) {
+              if (char.properties.write || char.properties.writeWithoutResponse) {
+                characteristic = char;
+                break;
+              }
+            }
+            if (characteristic) break;
+          } catch { continue; }
         }
-        if (characteristic) break;
-      } catch { continue; }
+      } catch (e) {
+        console.warn('[Printer] Error buscando servicios (reintento)', e);
+      }
+
+      if (!characteristic) {
+        retries--;
+        if (retries > 0) {
+          console.log(`[Printer] Reintentando buscar características... (${retries} intentos restantes)`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
     }
 
     if (!characteristic) return false;
@@ -413,23 +432,40 @@ export async function connectBluetoothPrinter(): Promise<PrinterConnection> {
 
     const server = await device.gatt.connect();
     
-    // Try each known service UUID
+    // Pequeño delay para que el stack de Bluetooth de Windows se estabilice
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     let characteristic: any = null;
+    let retries = 3;
     
-    for (const serviceUUID of BT_SERVICES) {
+    while (retries > 0 && !characteristic) {
       try {
-        const service = await server.getPrimaryService(serviceUUID);
-        const chars = await service.getCharacteristics();
-        // Find writable characteristic
-        for (const char of chars) {
-          if (char.properties.write || char.properties.writeWithoutResponse) {
-            characteristic = char;
-            break;
+        for (const serviceUUID of BT_SERVICES) {
+          try {
+            const service = await server.getPrimaryService(serviceUUID);
+            const chars = await service.getCharacteristics();
+            // Find writable characteristic
+            for (const char of chars) {
+              if (char.properties.write || char.properties.writeWithoutResponse) {
+                characteristic = char;
+                break;
+              }
+            }
+            if (characteristic) break;
+          } catch {
+            continue;
           }
         }
-        if (characteristic) break;
-      } catch {
-        continue;
+      } catch (e) {
+        console.warn('[Printer] Error buscando servicios manual (reintento)', e);
+      }
+
+      if (!characteristic) {
+        retries--;
+        if (retries > 0) {
+          console.log(`[Printer] Reintentando buscar características... (${retries} intentos restantes)`);
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
     }
 

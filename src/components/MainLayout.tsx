@@ -203,7 +203,6 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
                             </span>
                         )}
                         <PrinterStatusBadge />
-                        <PrinterStatusBadge />
                     </div>
 
                     {/* Desktop Navigation */}

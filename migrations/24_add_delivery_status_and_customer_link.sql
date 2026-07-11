@@ -12,3 +12,11 @@ WHERE ip.vehicle_id = v.id AND ip.customer_id IS NULL;
 UPDATE installment_plans
 SET status = 'FINALIZADO'
 WHERE installments_paid >= total_installments AND status = 'ACTIVO';
+
+-- 4. Drop the legacy unique constraint on vehicle_id
+ALTER TABLE installment_plans DROP CONSTRAINT IF EXISTS installment_plans_vehicle_id_key;
+
+-- 5. Create a partial unique index to ensure a vehicle can only have one active plan at any time
+CREATE UNIQUE INDEX IF NOT EXISTS active_plan_per_vehicle_unique 
+ON installment_plans (vehicle_id) 
+WHERE (status = 'ACTIVO');
